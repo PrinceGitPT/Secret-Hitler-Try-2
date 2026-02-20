@@ -9,8 +9,15 @@ import { LegislativePanel } from "@/components/game/LegislativePanel";
 import { FactionIntelPanel } from "@/components/game/FactionIntelPanel";
 import { ChatPanel } from "@/components/game/ChatPanel";
 import { PowersPanelPlaceholder } from "@/components/game/PowersPanelPlaceholder";
+import { WinnerBanner } from "@/components/game/WinnerBanner";
 import type { PublicChatMessage } from "@/lib/chat/types";
-import type { EligibleActions, PublicRoom, ThemeManifest, ViewerIdentity } from "@/lib/game/types";
+import type {
+  EligibleActions,
+  ExecutiveResolution,
+  PublicRoom,
+  ThemeManifest,
+  ViewerIdentity
+} from "@/lib/game/types";
 
 interface TabletopLayoutProps {
   room: PublicRoom;
@@ -23,6 +30,7 @@ interface TabletopLayoutProps {
   onVote: (vote: "JA" | "NEIN") => void;
   onPresidentDiscard: (cardIndex: number) => void;
   onChancellorDiscard: (cardIndex: number) => void;
+  onResolveExecutivePower: (resolution: ExecutiveResolution) => void;
   chatMessages: PublicChatMessage[];
   chatCanSend: boolean;
   chatDisabledReason?: string;
@@ -41,24 +49,42 @@ export function TabletopLayout({
   onVote,
   onPresidentDiscard,
   onChancellorDiscard,
+  onResolveExecutivePower,
   chatMessages,
   chatCanSend,
   chatDisabledReason,
   chatBusy,
   onSendChat
 }: TabletopLayoutProps) {
-  const [nomineeId, setNomineeId] = useState<string>(eligible.eligibleNomineeIds[0] ?? "");
+  const eligibleNominees = useMemo(() => eligible.eligibleNomineeIds ?? [], [eligible.eligibleNomineeIds]);
+  const eligibleExecutiveTargets = useMemo(
+    () => eligible.eligibleExecutiveTargets ?? [],
+    [eligible.eligibleExecutiveTargets]
+  );
+  const [nomineeId, setNomineeId] = useState<string>(eligibleNominees[0] ?? "");
+  const [executionTargetId, setExecutionTargetId] = useState<string>(eligibleExecutiveTargets[0] ?? "");
 
   useEffect(() => {
-    if (eligible.eligibleNomineeIds.length === 0) {
+    if (eligibleNominees.length === 0) {
       setNomineeId("");
       return;
     }
 
-    if (!eligible.eligibleNomineeIds.includes(nomineeId)) {
-      setNomineeId(eligible.eligibleNomineeIds[0]);
+    if (!eligibleNominees.includes(nomineeId)) {
+      setNomineeId(eligibleNominees[0]);
     }
-  }, [eligible.eligibleNomineeIds, nomineeId]);
+  }, [eligibleNominees, nomineeId]);
+
+  useEffect(() => {
+    if (eligibleExecutiveTargets.length === 0) {
+      setExecutionTargetId("");
+      return;
+    }
+
+    if (!eligibleExecutiveTargets.includes(executionTargetId)) {
+      setExecutionTargetId(eligibleExecutiveTargets[0]);
+    }
+  }, [eligibleExecutiveTargets, executionTargetId]);
 
   const game = room.game;
 
@@ -88,7 +114,8 @@ export function TabletopLayout({
     game.phase === "NOMINATION" ||
     game.phase === "VOTING" ||
     game.phase === "LEGISLATIVE_PRESIDENT" ||
-    game.phase === "LEGISLATIVE_CHANCELLOR";
+    game.phase === "LEGISLATIVE_CHANCELLOR" ||
+    game.phase === "EXECUTIVE_ACTION";
   const teamClass = viewer?.team === "FASCIST" ? "fascist" : "liberal";
   const roleLabel = viewer
     ? viewer.role === "HITLER"
@@ -113,6 +140,7 @@ export function TabletopLayout({
           <div className="table-status">
             <span className="room-pill">President: {president?.name ?? "-"}</span>
             <span className="room-pill">Chancellor: {chancellor?.name ?? "-"}</span>
+            <span className="room-pill">Election Tracker: {game.electionTracker}/3</span>
             <span className="room-pill">You: {actor?.name ?? "Observer"}</span>
             {viewer ? (
               <span className={`team-pill ${teamClass}`}>
@@ -123,6 +151,10 @@ export function TabletopLayout({
         </div>
 
         <div className="panel table-surface">
+          {game.phase === "GAME_OVER" ? (
+            <WinnerBanner winner={game.winner} winReason={game.winReason} theme={theme} />
+          ) : null}
+
           {showTopActionPanel ? (
             <div className="top-action-slot">
               {game.phase === "NOMINATION" ? (
@@ -184,6 +216,57 @@ export function TabletopLayout({
                   }
                   disabled={busy}
                 />
+              ) : null}
+
+              {game.phase === "EXECUTIVE_ACTION" ? (
+                <div>
+                  <h4>Executive Action</h4>
+                  <p className="info-inline">
+                    Pending power: <strong>{game.pendingExecutivePower?.power ?? "UNKNOWN"}</strong>
+                  </p>
+
+                  {game.pendingExecutivePower?.power === "EXECUTION" ? (
+                    <div className="inline-row" style={{ marginTop: 8 }}>
+                      <select
+                        value={executionTargetId}
+                        onChange={(event) => setExecutionTargetId(event.target.value)}
+                        disabled={!eligible.canResolveExecutivePower || busy}
+                        style={{ minWidth: 220 }}
+                      >
+                        {eligible.eligibleExecutiveTargets.map((candidateId) => {
+                          const player = room.players.find((candidate) => candidate.id === candidateId);
+                          if (!player) {
+                            return null;
+                          }
+                          return (
+                            <option key={candidateId} value={candidateId}>
+                              {player.name} (Seat {player.seat})
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      <button
+                        type="button"
+                        className="button-danger"
+                        onClick={() =>
+                          executionTargetId &&
+                          onResolveExecutivePower({ kind: "EXECUTION", targetId: executionTargetId })
+                        }
+                        disabled={!eligible.canResolveExecutivePower || !executionTargetId || busy}
+                      >
+                        Execute Target
+                      </button>
+                      {!eligible.canResolveExecutivePower ? (
+                        <span className="info-inline">Waiting for current president.</span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="info-inline" style={{ marginTop: 8 }}>
+                      Server is resolving this placeholder power automatically.
+                    </p>
+                  )}
+                </div>
               ) : null}
             </div>
           ) : null}

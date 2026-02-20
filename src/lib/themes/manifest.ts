@@ -26,6 +26,20 @@ const minimalBotColorImages: ThemeManifest["botColorImages"] = {
   GRAY: "/themes/minimal/bots/gray.svg"
 };
 
+const classicWinnerBannerByReason: ThemeManifest["winnerBannerByReason"] = {
+  LIBERAL_POLICY: "/themes/classic/winner-liberal-policy.svg",
+  FASCIST_POLICY: "/themes/classic/winner-fascist-policy.svg",
+  HITLER_ELECTED_CHANCELLOR: "/themes/classic/winner-hitler-elected.svg",
+  HITLER_EXECUTED: "/themes/classic/winner-hitler-executed.svg"
+};
+
+const minimalWinnerBannerByReason: ThemeManifest["winnerBannerByReason"] = {
+  LIBERAL_POLICY: "/themes/minimal/winner-liberal-policy.svg",
+  FASCIST_POLICY: "/themes/minimal/winner-fascist-policy.svg",
+  HITLER_ELECTED_CHANCELLOR: "/themes/minimal/winner-hitler-elected.svg",
+  HITLER_EXECUTED: "/themes/minimal/winner-hitler-executed.svg"
+};
+
 export const themeManifest: ThemeManifest[] = [
   {
     id: "classic",
@@ -35,7 +49,8 @@ export const themeManifest: ThemeManifest[] = [
     fascistCardFace: "/themes/classic/fascist-card.svg",
     cardBack: "/themes/classic/card-back.svg",
     deadPlayerOverlayImage: "/themes/classic/dead-overlay.svg",
-    botColorImages: classicBotColorImages
+    botColorImages: classicBotColorImages,
+    winnerBannerByReason: classicWinnerBannerByReason
   },
   {
     id: "minimal",
@@ -45,7 +60,8 @@ export const themeManifest: ThemeManifest[] = [
     fascistCardFace: "/themes/minimal/fascist-card.svg",
     cardBack: "/themes/minimal/card-back.svg",
     deadPlayerOverlayImage: "/themes/minimal/dead-overlay.svg",
-    botColorImages: minimalBotColorImages
+    botColorImages: minimalBotColorImages,
+    winnerBannerByReason: minimalWinnerBannerByReason
   }
 ];
 

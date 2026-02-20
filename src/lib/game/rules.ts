@@ -12,6 +12,10 @@ export function sortedPlayers(room: Room): Player[] {
   return [...room.players].sort((a, b) => a.seat - b.seat);
 }
 
+function isAlive(player: Player): boolean {
+  return player.alive !== false;
+}
+
 export function getPresident(room: Room): Player | undefined {
   if (!room.game) {
     return undefined;
@@ -30,8 +34,22 @@ export function getEligibleNominees(room: Room): Player[] {
   if (!room.game) {
     return [];
   }
-  const presidentSeat = room.game.presidentSeat;
-  return sortedPlayers(room).filter((player) => player.seat !== presidentSeat);
+
+  const blockedSeats = new Set<number>([room.game.presidentSeat]);
+
+  if (room.game.lastElectedChancellorSeat !== undefined) {
+    blockedSeats.add(room.game.lastElectedChancellorSeat);
+  }
+
+  if (room.roomSize >= 6 && room.game.lastElectedPresidentSeat !== undefined) {
+    blockedSeats.add(room.game.lastElectedPresidentSeat);
+  }
+
+  return sortedPlayers(room).filter((player) => isAlive(player) && !blockedSeats.has(player.seat));
+}
+
+export function getEligibleExecutionTargets(room: Room): Player[] {
+  return sortedPlayers(room).filter((player) => isAlive(player));
 }
 
 export function hasActorVoted(game: GameState, actorId: string): boolean {
@@ -42,7 +60,16 @@ export function allVotesSubmitted(room: Room): boolean {
   if (!room.game) {
     return false;
   }
-  return Object.keys(room.game.pendingVotes).length === room.players.length;
+
+  const aliveVoterIds = new Set(room.players.filter((player) => isAlive(player)).map((player) => player.id));
+  let submitted = 0;
+  for (const voterId of Object.keys(room.game.pendingVotes)) {
+    if (aliveVoterIds.has(voterId)) {
+      submitted += 1;
+    }
+  }
+
+  return submitted === aliveVoterIds.size;
 }
 
 export function countVotes(votes: Record<string, Vote>): { ja: number; nein: number } {
@@ -60,7 +87,14 @@ export function countVotes(votes: Record<string, Vote>): { ja: number; nein: num
 }
 
 export function nextSeat(room: Room, currentSeat: number): number {
-  const seats = sortedPlayers(room).map((player) => player.seat);
+  const seats = sortedPlayers(room)
+    .filter((player) => isAlive(player))
+    .map((player) => player.seat);
+
+  if (seats.length === 0) {
+    return currentSeat;
+  }
+
   const currentIndex = seats.findIndex((seat) => seat === currentSeat);
   if (currentIndex === -1) {
     return seats[0] ?? 1;

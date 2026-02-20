@@ -244,8 +244,14 @@ export function startGame(room: Room, rng: RandomSource = systemRandom): Room {
       discardPile: [],
       liberalEnacted: 0,
       fascistEnacted: 0,
+      electionTracker: 0,
       pendingVotes: {},
-      enactmentSequence: 0
+      lastElectedPresidentSeat: undefined,
+      lastElectedChancellorSeat: undefined,
+      pendingExecutivePower: undefined,
+      enactmentSequence: 0,
+      winner: undefined,
+      winReason: undefined
     },
     updatedAt: Date.now(),
     version: withBots.version + 1

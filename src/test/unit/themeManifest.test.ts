@@ -14,6 +14,13 @@ describe("theme manifest", () => {
       for (const image of Object.values(theme.botColorImages)) {
         expect(image.startsWith("/themes/")).toBe(true);
       }
+
+      expect(Object.keys(theme.winnerBannerByReason).sort()).toEqual(
+        ["FASCIST_POLICY", "HITLER_ELECTED_CHANCELLOR", "HITLER_EXECUTED", "LIBERAL_POLICY"].sort()
+      );
+      for (const image of Object.values(theme.winnerBannerByReason)) {
+        expect(image.startsWith("/themes/")).toBe(true);
+      }
     }
   });
 });

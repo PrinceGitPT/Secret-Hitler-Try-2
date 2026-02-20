@@ -1,23 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+  allVotesSubmitted,
   countVotes,
   getEligibleNominees,
   nextSeat
 } from "@/lib/game/rules";
-import type { Room } from "@/lib/game/types";
+import type { Room, RoomSize } from "@/lib/game/types";
 
-function sampleRoom(): Room {
+function sampleRoom(roomSize: RoomSize = 5): Room {
+  const players = Array.from({ length: roomSize }, (_, index) => {
+    const seat = index + 1;
+    return {
+      id: `p${seat}`,
+      name: `P${seat}`,
+      isBot: false,
+      seat,
+      connected: true,
+      alive: true,
+      role: seat === roomSize ? "HITLER" : seat === roomSize - 1 ? "FASCIST" : "LIBERAL"
+    } as const;
+  });
+
   return {
     code: "ABC123",
-    roomSize: 5,
+    roomSize,
     themeId: "classic",
-    players: [
-      { id: "p1", name: "P1", isBot: false, seat: 1, connected: true, alive: true, role: "LIBERAL" },
-      { id: "p2", name: "P2", isBot: false, seat: 2, connected: true, alive: true, role: "LIBERAL" },
-      { id: "p3", name: "P3", isBot: false, seat: 3, connected: true, alive: true, role: "FASCIST" },
-      { id: "p4", name: "P4", isBot: false, seat: 4, connected: true, alive: true, role: "HITLER" },
-      { id: "p5", name: "P5", isBot: false, seat: 5, connected: true, alive: true, role: "LIBERAL" }
-    ],
+    players,
     hostId: "p1",
     locked: true,
     game: {
@@ -27,7 +35,10 @@ function sampleRoom(): Room {
       discardPile: [],
       liberalEnacted: 0,
       fascistEnacted: 0,
+      electionTracker: 0,
       pendingVotes: {},
+      lastElectedPresidentSeat: 2,
+      lastElectedChancellorSeat: 3,
       enactmentSequence: 0
     },
     createdAt: 0,
@@ -37,11 +48,29 @@ function sampleRoom(): Room {
 }
 
 describe("rules", () => {
-  it("excludes president from eligible nominees", () => {
-    const room = sampleRoom();
+  it("applies 6-10 player term limits to previous president and previous chancellor", () => {
+    const room = sampleRoom(6);
     const nomineeIds = getEligibleNominees(room).map((player) => player.id);
 
-    expect(nomineeIds).toEqual(["p2", "p3", "p4", "p5"]);
+    expect(nomineeIds).toEqual(["p4", "p5", "p6"]);
+  });
+
+  it("applies 5-player exception (previous president can be nominated)", () => {
+    const room = sampleRoom(5);
+    const nomineeIds = getEligibleNominees(room).map((player) => player.id);
+
+    expect(nomineeIds).toEqual(["p2", "p4", "p5"]);
+  });
+
+  it("excludes dead players from nominee pool and seat rotation", () => {
+    const room = sampleRoom(7);
+    room.players.find((player) => player.id === "p4")!.alive = false;
+    room.players.find((player) => player.id === "p5")!.alive = false;
+
+    const nomineeIds = getEligibleNominees(room).map((player) => player.id);
+    expect(nomineeIds).toEqual(["p6", "p7"]);
+
+    expect(nextSeat(room, 3)).toBe(6);
   });
 
   it("counts JA/NEIN votes correctly", () => {
@@ -56,8 +85,17 @@ describe("rules", () => {
     expect(tally).toEqual({ ja: 3, nein: 2 });
   });
 
-  it("rotates to first seat when wrapping", () => {
-    const room = sampleRoom();
-    expect(nextSeat(room, 5)).toBe(1);
+  it("requires votes from alive players only", () => {
+    const room = sampleRoom(5);
+    room.game!.phase = "VOTING";
+    room.players.find((player) => player.id === "p5")!.alive = false;
+    room.game!.pendingVotes = {
+      p1: "JA",
+      p2: "NEIN",
+      p3: "JA",
+      p4: "JA"
+    };
+
+    expect(allVotesSubmitted(room)).toBe(true);
   });
 });

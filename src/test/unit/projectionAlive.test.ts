@@ -37,6 +37,7 @@ describe("projection alive mapping", () => {
         discardPile: [],
         liberalEnacted: 0,
         fascistEnacted: 0,
+        electionTracker: 0,
         pendingVotes: {},
         enactmentSequence: 0
       },

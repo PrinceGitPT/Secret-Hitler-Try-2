@@ -386,6 +386,52 @@ button:disabled {
   background: rgba(11, 16, 14, 0.82);
 }
 
+.winner-banner {
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 231, 195, 0.24);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(12, 18, 15, 0.88);
+  display: grid;
+  gap: 10px;
+}
+
+.winner-banner.winner-liberal {
+  border-color: rgba(54, 155, 212, 0.55);
+  box-shadow: 0 0 0 1px rgba(54, 155, 212, 0.24) inset;
+}
+
+.winner-banner.winner-fascist {
+  border-color: rgba(214, 90, 76, 0.6);
+  box-shadow: 0 0 0 1px rgba(214, 90, 76, 0.24) inset;
+}
+
+.winner-image-wrap {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 231, 195, 0.2);
+  background: rgba(8, 12, 10, 0.85);
+}
+
+.winner-image {
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  display: block;
+}
+
+.winner-copy h3 {
+  margin: 0;
+  font-family: var(--font-display), "Times New Roman", serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.winner-copy p {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+}
+
 .top-action-slot + .table-board-section {
   margin-top: 4px;
 }

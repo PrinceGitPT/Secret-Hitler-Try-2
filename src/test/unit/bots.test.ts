@@ -24,6 +24,7 @@ function nominationRoom(): Room {
       discardPile: [],
       liberalEnacted: 0,
       fascistEnacted: 0,
+      electionTracker: 0,
       pendingVotes: {},
       enactmentSequence: 0
     },

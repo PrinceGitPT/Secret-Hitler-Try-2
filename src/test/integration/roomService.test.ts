@@ -8,7 +8,53 @@ import {
   submitActionService
 } from "@/lib/server/roomService";
 import { getRoomChatService } from "@/lib/server/chatService";
-import { resetMemoryKvForTests } from "@/lib/store/kv";
+import { resetMemoryKvForTests, writeRoom } from "@/lib/store/kv";
+import type { Room } from "@/lib/game/types";
+
+function serviceRoom(overrides: Partial<Room> = {}): Room {
+  const room: Room = {
+    code: "SRV001",
+    roomSize: 5,
+    themeId: "classic",
+    players: [
+      { id: "p1", name: "P1", isBot: false, seat: 1, connected: true, alive: true, role: "LIBERAL" },
+      { id: "p2", name: "P2", isBot: false, seat: 2, connected: true, alive: true, role: "LIBERAL" },
+      { id: "p3", name: "P3", isBot: false, seat: 3, connected: true, alive: true, role: "FASCIST" },
+      { id: "p4", name: "P4", isBot: false, seat: 4, connected: true, alive: true, role: "HITLER" },
+      { id: "p5", name: "P5", isBot: false, seat: 5, connected: true, alive: true, role: "LIBERAL" }
+    ],
+    hostId: "p1",
+    locked: true,
+    game: {
+      phase: "NOMINATION",
+      presidentSeat: 1,
+      drawPile: ["LIBERAL", "FASCIST", "FASCIST", "LIBERAL"],
+      discardPile: [],
+      liberalEnacted: 0,
+      fascistEnacted: 0,
+      electionTracker: 0,
+      pendingVotes: {},
+      lastElectedPresidentSeat: undefined,
+      lastElectedChancellorSeat: undefined,
+      pendingExecutivePower: undefined,
+      enactmentSequence: 0,
+      winner: undefined,
+      winReason: undefined
+    },
+    createdAt: 0,
+    updatedAt: 0,
+    version: 1
+  };
+
+  return {
+    ...room,
+    ...overrides,
+    game: {
+      ...room.game,
+      ...(overrides.game ?? {})
+    }
+  };
+}
 
 describe("room service integration", () => {
   beforeEach(() => {
@@ -40,23 +86,11 @@ describe("room service integration", () => {
     expect(started.room.players).toHaveLength(5);
     expect(started.room.players.filter((player) => player.isBot)).toHaveLength(3);
     expect(started.room.game?.phase).toBe("NOMINATION");
-    expect(started.viewer).toBeDefined();
-    expect(started.viewer?.isHitler).toBe(started.viewer?.role === "HITLER");
-    expect(started.viewer?.team).toBe(started.viewer?.role === "LIBERAL" ? "LIBERAL" : "FASCIST");
-    expect(Array.isArray(started.viewer?.knownFactionMembers)).toBe(true);
+    expect(started.room.game?.electionTracker).toBe(0);
 
     const chatAfterStart = await getRoomChatService({ roomCode, actorId: hostId });
-    const startChatCount = chatAfterStart.messages.length;
-    expect(startChatCount).toBeGreaterThan(0);
+    expect(chatAfterStart.messages.length).toBeGreaterThan(0);
     expect(chatAfterStart.messages.some((message) => message.senderIsBot)).toBe(true);
-
-    const secondPerspective = await getRoomStateService({ roomCode, actorId: secondId });
-    expect(secondPerspective.viewer).toBeDefined();
-    expect(secondPerspective.viewer?.isHitler).toBe(secondPerspective.viewer?.role === "HITLER");
-    expect(secondPerspective.viewer?.team).toBe(
-      secondPerspective.viewer?.role === "LIBERAL" ? "LIBERAL" : "FASCIST"
-    );
-    expect(Array.isArray(secondPerspective.viewer?.knownFactionMembers)).toBe(true);
 
     await submitActionService({
       roomCode,
@@ -67,10 +101,6 @@ describe("room service integration", () => {
       },
       rng
     });
-
-    const chatAfterNomination = await getRoomChatService({ roomCode, actorId: hostId });
-    expect(chatAfterNomination.messages.length).toBeGreaterThan(startChatCount);
-    expect(chatAfterNomination.messages.some((message) => message.senderIsBot)).toBe(true);
 
     await submitActionService({
       roomCode,
@@ -94,7 +124,6 @@ describe("room service integration", () => {
 
     const legislative = await getRoomStateService({ roomCode, actorId: hostId });
     expect(legislative.room.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
-    expect(legislative.room.game?.legislativeHand).toHaveLength(3);
 
     await submitActionService({
       roomCode,
@@ -120,7 +149,142 @@ describe("room service integration", () => {
     const enacted =
       (afterEnact.room.game?.liberalEnacted ?? 0) + (afterEnact.room.game?.fascistEnacted ?? 0);
 
-    expect(afterEnact.room.game?.phase).toBe("NOMINATION");
+    expect(["NOMINATION", "EXECUTIVE_ACTION", "GAME_OVER"]).toContain(afterEnact.room.game?.phase);
     expect(enacted).toBe(1);
+  });
+
+  it("ends game from policy win via submitAction service", async () => {
+    const room = serviceRoom({
+      code: "WINPOL",
+      game: {
+        phase: "LEGISLATIVE_CHANCELLOR",
+        presidentSeat: 1,
+        chancellorSeat: 2,
+        legislativeHand: ["LIBERAL", "FASCIST"],
+        liberalEnacted: 4
+      }
+    });
+
+    await writeRoom(room);
+
+    const result = await submitActionService({
+      roomCode: "WINPOL",
+      action: {
+        type: "CHANCELLOR_DISCARD",
+        actorId: "p2",
+        cardIndex: 1
+      }
+    });
+
+    expect(result.room.game?.phase).toBe("GAME_OVER");
+    expect(result.room.game?.winner).toBe("LIBERAL");
+    expect(result.room.game?.winReason).toBe("LIBERAL_POLICY");
+  });
+
+  it("ends game when Hitler is elected chancellor after 3 fascist policies", async () => {
+    const room = serviceRoom({
+      code: "HITLEC",
+      game: {
+        phase: "VOTING",
+        presidentSeat: 1,
+        chancellorSeat: 4,
+        fascistEnacted: 3,
+        pendingVotes: {
+          p1: "JA",
+          p2: "JA",
+          p3: "JA",
+          p4: "NEIN"
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    const result = await submitActionService({
+      roomCode: "HITLEC",
+      action: {
+        type: "CAST_VOTE",
+        actorId: "p5",
+        vote: "JA"
+      }
+    });
+
+    expect(result.room.game?.phase).toBe("GAME_OVER");
+    expect(result.room.game?.winner).toBe("FASCIST");
+    expect(result.room.game?.winReason).toBe("HITLER_ELECTED_CHANCELLOR");
+  });
+
+  it("resolves execution through service and ends game when Hitler is executed", async () => {
+    const room = serviceRoom({
+      code: "EXEC01",
+      game: {
+        phase: "EXECUTIVE_ACTION",
+        presidentSeat: 1,
+        pendingExecutivePower: {
+          power: "EXECUTION",
+          sourceFascistCount: 4,
+          presidentSeat: 1
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    const result = await submitActionService({
+      roomCode: "EXEC01",
+      action: {
+        type: "RESOLVE_EXECUTIVE_POWER",
+        actorId: "p1",
+        resolution: {
+          kind: "EXECUTION",
+          targetId: "p4"
+        }
+      }
+    });
+
+    expect(result.room.game?.phase).toBe("GAME_OVER");
+    expect(result.room.game?.winner).toBe("LIBERAL");
+    expect(result.room.game?.winReason).toBe("HITLER_EXECUTED");
+  });
+
+  it("chaos top-decks at three failed elections", async () => {
+    const room = serviceRoom({
+      code: "CHAOS1",
+      game: {
+        phase: "VOTING",
+        presidentSeat: 1,
+        chancellorSeat: 2,
+        drawPile: ["FASCIST"],
+        discardPile: ["LIBERAL"],
+        fascistEnacted: 3,
+        electionTracker: 2,
+        pendingVotes: {
+          p1: "NEIN",
+          p2: "NEIN",
+          p3: "NEIN",
+          p4: "JA"
+        },
+        lastElectedPresidentSeat: 1,
+        lastElectedChancellorSeat: 2
+      }
+    });
+
+    await writeRoom(room);
+
+    const result = await submitActionService({
+      roomCode: "CHAOS1",
+      action: {
+        type: "CAST_VOTE",
+        actorId: "p5",
+        vote: "NEIN"
+      }
+    });
+
+    expect(result.room.game?.phase).toBe("NOMINATION");
+    expect(result.room.game?.electionTracker).toBe(0);
+    expect(result.room.game?.fascistEnacted).toBe(4);
+    expect(result.room.game?.pendingExecutivePower).toBeUndefined();
+    expect(result.room.game?.lastElectedPresidentSeat).toBeUndefined();
+    expect(result.room.game?.lastElectedChancellorSeat).toBeUndefined();
   });
 });

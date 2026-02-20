@@ -1,5 +1,13 @@
 import { cloneRoom } from "@/lib/game/clone";
+import {
+  clearLastElectedGovernment,
+  incrementElectionTracker,
+  recordElectedGovernment,
+  resetElectionTracker,
+  shouldTriggerChaos
+} from "@/lib/game/electionTracker";
 import { GameInvariantError } from "@/lib/game/errors";
+import { createPendingExecutivePower, resolvePendingExecutivePower } from "@/lib/game/executive";
 import { getPowerSlot } from "@/lib/game/powers/track";
 import { shuffle, systemRandom, type RandomSource } from "@/lib/game/random";
 import {
@@ -12,12 +20,8 @@ import {
   hasActorVoted,
   nextSeat
 } from "@/lib/game/rules";
+import { applyGameOver, checkHitlerElectionWin, checkHitlerExecutedWin, checkPolicyWin } from "@/lib/game/win";
 import type { GameAction, GameEvent, Policy, Room } from "@/lib/game/types";
-
-const FULL_POLICY_SET: Policy[] = [
-  ...Array.from({ length: 6 }, () => "LIBERAL" as const),
-  ...Array.from({ length: 11 }, () => "FASCIST" as const)
-];
 
 function drawOnePolicy(room: Room, rng: RandomSource): Policy {
   if (!room.game) {
@@ -26,12 +30,11 @@ function drawOnePolicy(room: Room, rng: RandomSource): Policy {
 
   if (room.game.drawPile.length === 0) {
     if (room.game.discardPile.length === 0) {
-      // Win conditions are intentionally deferred in MVP. Reset policy cycle when exhausted.
-      room.game.drawPile = shuffle(FULL_POLICY_SET, rng);
-    } else {
-      room.game.drawPile = shuffle(room.game.discardPile, rng);
-      room.game.discardPile = [];
+      throw new GameInvariantError("DRAW_FAILED", "No policies left in draw or discard piles.");
     }
+
+    room.game.drawPile = shuffle(room.game.discardPile, rng);
+    room.game.discardPile = [];
   }
 
   const card = room.game.drawPile.pop();
@@ -45,14 +48,24 @@ function drawPolicies(room: Room, count: number, rng: RandomSource): Policy[] {
   return Array.from({ length: count }, () => drawOnePolicy(room, rng));
 }
 
+function clearRoundTransientState(room: Room): void {
+  if (!room.game) {
+    return;
+  }
+
+  room.game.chancellorSeat = undefined;
+  room.game.pendingVotes = {};
+  room.game.legislativeHand = undefined;
+  room.game.pendingExecutivePower = undefined;
+}
+
 function finalizeRoundAfterVoteFailure(room: Room): void {
   if (!room.game) {
     return;
   }
+
+  clearRoundTransientState(room);
   room.game.phase = "NOMINATION";
-  room.game.chancellorSeat = undefined;
-  room.game.pendingVotes = {};
-  room.game.legislativeHand = undefined;
   room.game.presidentSeat = nextSeat(room, room.game.presidentSeat);
 }
 
@@ -60,11 +73,108 @@ function finalizeRoundAfterEnactment(room: Room): void {
   if (!room.game) {
     return;
   }
+
+  clearRoundTransientState(room);
   room.game.phase = "NOMINATION";
-  room.game.chancellorSeat = undefined;
-  room.game.pendingVotes = {};
-  room.game.legislativeHand = undefined;
   room.game.presidentSeat = nextSeat(room, room.game.presidentSeat);
+}
+
+function enactPolicy(
+  room: Room,
+  policy: Policy,
+  events: GameEvent[],
+  options: { ignoreExecutivePower?: boolean } = {}
+): void {
+  if (!room.game) {
+    return;
+  }
+
+  const game = room.game;
+  game.lastEnactedPolicy = policy;
+  game.enactmentSequence += 1;
+
+  if (policy === "LIBERAL") {
+    game.liberalEnacted += 1;
+  } else {
+    game.fascistEnacted += 1;
+  }
+
+  events.push({
+    type: "POLICY_ENACTED",
+    policy,
+    liberalEnacted: game.liberalEnacted,
+    fascistEnacted: game.fascistEnacted
+  });
+
+  const winner = checkPolicyWin(game);
+  if (winner) {
+    applyGameOver(game, winner);
+    return;
+  }
+
+  if (policy !== "FASCIST" || options.ignoreExecutivePower) {
+    return;
+  }
+
+  const slot = getPowerSlot(room.roomSize, game.fascistEnacted);
+  if (!slot) {
+    return;
+  }
+
+  events.push({
+    type: "POWER_SLOT_REACHED",
+    roomSize: room.roomSize,
+    fascistCount: slot.fascistCount,
+    power: slot.power
+  });
+
+  const pending = createPendingExecutivePower({
+    power: slot.power,
+    sourceFascistCount: slot.fascistCount,
+    presidentSeat: game.presidentSeat
+  });
+
+  if (!pending) {
+    return;
+  }
+
+  game.pendingExecutivePower = pending;
+  game.phase = "EXECUTIVE_ACTION";
+}
+
+function resolveChaosTopDeck(room: Room, events: GameEvent[], rng: RandomSource): void {
+  if (!room.game) {
+    return;
+  }
+
+  const game = room.game;
+  const topDeckPolicy = drawOnePolicy(room, rng);
+  enactPolicy(room, topDeckPolicy, events, { ignoreExecutivePower: true });
+
+  resetElectionTracker(game);
+  clearLastElectedGovernment(game);
+
+  if (game.phase !== "GAME_OVER") {
+    finalizeRoundAfterVoteFailure(room);
+  } else {
+    clearRoundTransientState(room);
+  }
+}
+
+function processFailedElection(room: Room, events: GameEvent[], rng: RandomSource): void {
+  if (!room.game) {
+    return;
+  }
+
+  const game = room.game;
+  incrementElectionTracker(game);
+
+  if (shouldTriggerChaos(game)) {
+    resolveChaosTopDeck(room, events, rng);
+    return;
+  }
+
+  finalizeRoundAfterVoteFailure(room);
 }
 
 export function applyAction(
@@ -81,6 +191,10 @@ export function applyAction(
 
   const { game } = nextRoom;
 
+  if (game.phase === "GAME_OVER") {
+    throw new GameInvariantError("GAME_OVER", "Game is already over.");
+  }
+
   switch (action.type) {
     case "NOMINATE_CHANCELLOR": {
       if (game.phase !== "NOMINATION") {
@@ -92,9 +206,17 @@ export function applyAction(
         throw new GameInvariantError("NOT_PRESIDENT", "Only the current president can nominate.");
       }
 
+      if (!president.alive) {
+        throw new GameInvariantError("NOT_ALIVE", "Dead players cannot nominate.");
+      }
+
       const nominee = getPlayerById(nextRoom, action.nomineeId);
       if (!nominee) {
         throw new GameInvariantError("UNKNOWN_NOMINEE", "Nominee does not exist.");
+      }
+
+      if (!nominee.alive) {
+        throw new GameInvariantError("NOT_ALIVE", "Dead players cannot be nominated.");
       }
 
       const eligibleNomineeIds = new Set(getEligibleNominees(nextRoom).map((player) => player.id));
@@ -118,6 +240,10 @@ export function applyAction(
         throw new GameInvariantError("UNKNOWN_VOTER", "Voter does not exist.");
       }
 
+      if (!voter.alive) {
+        throw new GameInvariantError("NOT_ALIVE", "Dead players cannot vote.");
+      }
+
       if (hasActorVoted(game, action.actorId)) {
         throw new GameInvariantError("ALREADY_VOTED", "Voter already submitted a vote.");
       }
@@ -127,11 +253,19 @@ export function applyAction(
       if (allVotesSubmitted(nextRoom)) {
         const tally = countVotes(game.pendingVotes);
         if (tally.ja > tally.nein) {
+          recordElectedGovernment(game);
+
+          const hitlerElectionWin = checkHitlerElectionWin(nextRoom);
+          if (hitlerElectionWin) {
+            applyGameOver(game, hitlerElectionWin);
+            break;
+          }
+
           game.phase = "LEGISLATIVE_PRESIDENT";
           game.pendingVotes = {};
           game.legislativeHand = drawPolicies(nextRoom, 3, rng);
         } else {
-          finalizeRoundAfterVoteFailure(nextRoom);
+          processFailedElection(nextRoom, events, rng);
         }
       }
 
@@ -149,6 +283,10 @@ export function applyAction(
       const president = getPresident(nextRoom);
       if (!president || president.id !== action.actorId) {
         throw new GameInvariantError("NOT_PRESIDENT", "Only the current president can discard first.");
+      }
+
+      if (!president.alive) {
+        throw new GameInvariantError("NOT_ALIVE", "Dead players cannot discard policies.");
       }
 
       if (!game.legislativeHand || game.legislativeHand.length !== 3) {
@@ -180,6 +318,10 @@ export function applyAction(
         throw new GameInvariantError("NOT_CHANCELLOR", "Only the nominated chancellor can discard second.");
       }
 
+      if (!chancellor.alive) {
+        throw new GameInvariantError("NOT_ALIVE", "Dead players cannot discard policies.");
+      }
+
       if (!game.legislativeHand || game.legislativeHand.length !== 2) {
         throw new GameInvariantError("INVALID_HAND", "Chancellor legislative hand is invalid.");
       }
@@ -196,31 +338,32 @@ export function applyAction(
       }
 
       game.discardPile.push(discardedCard);
-      game.lastEnactedPolicy = enactedCard;
-      game.enactmentSequence += 1;
+      enactPolicy(nextRoom, enactedCard, events);
 
-      if (enactedCard === "LIBERAL") {
-        game.liberalEnacted += 1;
-      } else {
-        game.fascistEnacted += 1;
+      const phaseAfterEnactment = nextRoom.game?.phase;
+      if (phaseAfterEnactment === "GAME_OVER" || phaseAfterEnactment === "EXECUTIVE_ACTION") {
+        break;
       }
 
-      events.push({
-        type: "POLICY_ENACTED",
-        policy: enactedCard,
-        liberalEnacted: game.liberalEnacted,
-        fascistEnacted: game.fascistEnacted
-      });
+      finalizeRoundAfterEnactment(nextRoom);
+      break;
+    }
 
-      if (enactedCard === "FASCIST") {
-        const slot = getPowerSlot(nextRoom.roomSize, game.fascistEnacted);
-        if (slot) {
-          events.push({
-            type: "POWER_SLOT_REACHED",
-            roomSize: nextRoom.roomSize,
-            fascistCount: slot.fascistCount,
-            power: slot.power
-          });
+    case "RESOLVE_EXECUTIVE_POWER": {
+      if (game.phase !== "EXECUTIVE_ACTION") {
+        throw new GameInvariantError(
+          "INVALID_PHASE",
+          "Executive power resolution is only allowed during EXECUTIVE_ACTION phase."
+        );
+      }
+
+      const result = resolvePendingExecutivePower(nextRoom, action.actorId, action.resolution);
+
+      if (result.executedTargetId) {
+        const hitlerExecutedWin = checkHitlerExecutedWin(nextRoom, result.executedTargetId);
+        if (hitlerExecutedWin) {
+          applyGameOver(game, hitlerExecutedWin);
+          break;
         }
       }
 

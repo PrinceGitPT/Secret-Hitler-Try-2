@@ -1,4 +1,5 @@
 import { applyAction } from "@/lib/game/engine";
+import { buildAutoExecutiveResolution } from "@/lib/game/executive";
 import { postBotPhaseMessage } from "@/lib/server/chatService";
 import { GameInvariantError } from "@/lib/game/errors";
 import { dispatchExecutivePower } from "@/lib/game/powers/dispatcher";
@@ -13,7 +14,7 @@ import {
   startGame,
   updateRoomConfig
 } from "@/lib/game/setup";
-import type { GameAction, Phase, Room, RoomProjection, RoomSize } from "@/lib/game/types";
+import type { GameAction, GameState, Phase, Room, RoomProjection, RoomSize } from "@/lib/game/types";
 import { getThemeById, listThemes } from "@/lib/themes/manifest";
 import { readRoom, writeRoom } from "@/lib/store/kv";
 
@@ -42,12 +43,73 @@ function assertRoomSize(roomSize: number): asserts roomSize is RoomSize {
   }
 }
 
+function normalizeRoom(room: Room): Room {
+  let changed = false;
+
+  const players = room.players.map((player) => {
+    if (player.alive === undefined) {
+      changed = true;
+      return {
+        ...player,
+        alive: true
+      };
+    }
+
+    return player;
+  });
+
+  if (!room.game) {
+    return changed ? { ...room, players } : room;
+  }
+
+  const legacy = room.game as Partial<GameState>;
+  const gameChanged =
+    legacy.electionTracker === undefined ||
+    legacy.pendingVotes === undefined ||
+    legacy.enactmentSequence === undefined ||
+    legacy.drawPile === undefined ||
+    legacy.discardPile === undefined ||
+    legacy.liberalEnacted === undefined ||
+    legacy.fascistEnacted === undefined;
+
+  if (!changed && !gameChanged) {
+    return room;
+  }
+
+  const normalizedGame: GameState = {
+    phase: legacy.phase ?? "NOMINATION",
+    presidentSeat: legacy.presidentSeat ?? 1,
+    chancellorSeat: legacy.chancellorSeat,
+    drawPile: legacy.drawPile ?? [],
+    discardPile: legacy.discardPile ?? [],
+    liberalEnacted: legacy.liberalEnacted ?? 0,
+    fascistEnacted: legacy.fascistEnacted ?? 0,
+    electionTracker: legacy.electionTracker ?? 0,
+    pendingVotes: legacy.pendingVotes ?? {},
+    legislativeHand: legacy.legislativeHand,
+    lastElectedPresidentSeat: legacy.lastElectedPresidentSeat,
+    lastElectedChancellorSeat: legacy.lastElectedChancellorSeat,
+    pendingExecutivePower: legacy.pendingExecutivePower,
+    lastEnactedPolicy: legacy.lastEnactedPolicy,
+    enactmentSequence: legacy.enactmentSequence ?? 0,
+    winner: legacy.winner,
+    winReason: legacy.winReason
+  };
+
+  return {
+    ...room,
+    players,
+    game: normalizedGame
+  };
+}
+
 async function getRoomOrThrow(roomCode: string): Promise<Room> {
   const room = await readRoom(roomCode);
   if (!room) {
     throw new GameInvariantError("ROOM_NOT_FOUND", `Room ${roomCode} not found.`);
   }
-  return room;
+
+  return normalizeRoom(room);
 }
 
 async function generateUniqueRoomCode(rng: RandomSource): Promise<string> {
@@ -67,17 +129,37 @@ function ensureThemeExists(themeId: string): void {
   }
 }
 
-function nextBotAction(room: Room, rng: RandomSource): GameAction | null {
+function nextSystemAction(room: Room, rng: RandomSource): GameAction | null {
   if (!room.game) {
     return null;
   }
 
   const game = room.game;
+  if (game.phase === "GAME_OVER") {
+    return null;
+  }
+
+  if (game.phase === "EXECUTIVE_ACTION" && game.pendingExecutivePower) {
+    const president = getPresident(room);
+    if (!president) {
+      return null;
+    }
+
+    if (game.pendingExecutivePower.power !== "EXECUTION" || president.isBot) {
+      return {
+        type: "RESOLVE_EXECUTIVE_POWER",
+        actorId: president.id,
+        resolution: buildAutoExecutiveResolution(room, game.pendingExecutivePower, rng)
+      };
+    }
+
+    return null;
+  }
 
   switch (game.phase) {
     case "NOMINATION": {
       const president = getPresident(room);
-      if (!president || !president.isBot) {
+      if (!president || !president.isBot || !president.alive) {
         return null;
       }
 
@@ -90,7 +172,10 @@ function nextBotAction(room: Room, rng: RandomSource): GameAction | null {
 
     case "VOTING": {
       const pendingBot = sortedPlayers(room).find(
-        (player) => player.isBot && !Object.prototype.hasOwnProperty.call(game.pendingVotes, player.id)
+        (player) =>
+          player.isBot &&
+          player.alive &&
+          !Object.prototype.hasOwnProperty.call(game.pendingVotes, player.id)
       );
 
       if (!pendingBot) {
@@ -106,7 +191,7 @@ function nextBotAction(room: Room, rng: RandomSource): GameAction | null {
 
     case "LEGISLATIVE_PRESIDENT": {
       const president = getPresident(room);
-      if (!president || !president.isBot || !game.legislativeHand) {
+      if (!president || !president.isBot || !president.alive || !game.legislativeHand) {
         return null;
       }
 
@@ -119,7 +204,7 @@ function nextBotAction(room: Room, rng: RandomSource): GameAction | null {
 
     case "LEGISLATIVE_CHANCELLOR": {
       const chancellor = getChancellor(room);
-      if (!chancellor || !chancellor.isBot || !game.legislativeHand) {
+      if (!chancellor || !chancellor.isBot || !chancellor.alive || !game.legislativeHand) {
         return null;
       }
 
@@ -145,21 +230,25 @@ function processGameEvents(room: Room, events: ReturnType<typeof applyAction>["e
   room.updatedAt = Date.now();
 }
 
-function runBotLoop(initialRoom: Room, rng: RandomSource = systemRandom): Room {
+function runSystemLoop(initialRoom: Room, rng: RandomSource = systemRandom): Room {
   let room = initialRoom;
 
-  for (let step = 0; step < 200; step += 1) {
-    const botAction = nextBotAction(room, rng);
-    if (!botAction) {
+  for (let step = 0; step < 300; step += 1) {
+    if (room.game?.phase === "GAME_OVER") {
       return room;
     }
 
-    const result = applyAction(room, botAction, rng);
+    const action = nextSystemAction(room, rng);
+    if (!action) {
+      return room;
+    }
+
+    const result = applyAction(room, action, rng);
     room = result.room;
     processGameEvents(room, result.events);
   }
 
-  throw new GameInvariantError("BOT_LOOP_OVERFLOW", "Bot loop exceeded safe iteration cap.");
+  throw new GameInvariantError("BOT_LOOP_OVERFLOW", "System loop exceeded safe iteration cap.");
 }
 
 function ensureActorInRoom(room: Room, actorId: string): void {
@@ -311,7 +400,7 @@ export async function startRoomService(params: {
 
   const previousPhase = room.game?.phase;
   const started = startGame(room, params.rng ?? systemRandom);
-  const resolved = runBotLoop(started, params.rng ?? systemRandom);
+  const resolved = runSystemLoop(started, params.rng ?? systemRandom);
   await writeRoom(resolved);
   await emitPhaseBotChatIfNeeded({
     room: resolved,
@@ -360,7 +449,7 @@ export async function submitActionService(params: {
   const result = applyAction(room, params.action, params.rng ?? systemRandom);
   processGameEvents(result.room, result.events);
 
-  const resolved = runBotLoop(result.room, params.rng ?? systemRandom);
+  const resolved = runSystemLoop(result.room, params.rng ?? systemRandom);
   await writeRoom(resolved);
   await emitPhaseBotChatIfNeeded({
     room: resolved,

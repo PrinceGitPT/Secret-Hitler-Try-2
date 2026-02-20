@@ -26,6 +26,12 @@ const theme: ThemeManifest = {
     PINK: "/themes/classic/bots/pink.svg",
     BROWN: "/themes/classic/bots/brown.svg",
     GRAY: "/themes/classic/bots/gray.svg"
+  },
+  winnerBannerByReason: {
+    LIBERAL_POLICY: "/themes/classic/winner-liberal-policy.svg",
+    FASCIST_POLICY: "/themes/classic/winner-fascist-policy.svg",
+    HITLER_ELECTED_CHANCELLOR: "/themes/classic/winner-hitler-elected.svg",
+    HITLER_EXECUTED: "/themes/classic/winner-hitler-executed.svg"
   }
 };
 

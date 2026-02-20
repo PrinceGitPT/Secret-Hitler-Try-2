@@ -21,7 +21,16 @@ export type Phase =
   | "NOMINATION"
   | "VOTING"
   | "LEGISLATIVE_PRESIDENT"
-  | "LEGISLATIVE_CHANCELLOR";
+  | "LEGISLATIVE_CHANCELLOR"
+  | "EXECUTIVE_ACTION"
+  | "GAME_OVER";
+
+export type WinnerTeam = "LIBERAL" | "FASCIST";
+export type WinReason =
+  | "LIBERAL_POLICY"
+  | "FASCIST_POLICY"
+  | "HITLER_ELECTED_CHANCELLOR"
+  | "HITLER_EXECUTED";
 
 export interface Player {
   id: string;
@@ -58,10 +67,16 @@ export interface GameState {
   discardPile: Policy[];
   liberalEnacted: number;
   fascistEnacted: number;
+  electionTracker: number;
   pendingVotes: Record<string, Vote>;
   legislativeHand?: Policy[];
+  lastElectedPresidentSeat?: number;
+  lastElectedChancellorSeat?: number;
+  pendingExecutivePower?: PendingExecutivePower;
   lastEnactedPolicy?: Policy;
   enactmentSequence: number;
+  winner?: WinnerTeam;
+  winReason?: WinReason;
 }
 
 export interface Room {
@@ -105,7 +120,8 @@ export type GameAction =
   | { type: "NOMINATE_CHANCELLOR"; actorId: string; nomineeId: string }
   | { type: "CAST_VOTE"; actorId: string; vote: Vote }
   | { type: "LEGISLATIVE_DISCARD"; actorId: string; cardIndex: 0 | 1 | 2 }
-  | { type: "CHANCELLOR_DISCARD"; actorId: string; cardIndex: 0 | 1 };
+  | { type: "CHANCELLOR_DISCARD"; actorId: string; cardIndex: 0 | 1 }
+  | { type: "RESOLVE_EXECUTIVE_POWER"; actorId: string; resolution: ExecutiveResolution };
 
 export interface EligibleActions {
   canStart: boolean;
@@ -116,6 +132,8 @@ export interface EligibleActions {
   hasVoted: boolean;
   canPresidentDiscard: boolean;
   canChancellorDiscard: boolean;
+  canResolveExecutivePower: boolean;
+  eligibleExecutiveTargets: string[];
 }
 
 export interface RoomProjection {
@@ -145,6 +163,18 @@ export type ExecutivePower =
   | "POLICY_PEEK"
   | "EXECUTION";
 
+export interface PendingExecutivePower {
+  power: ExecutivePower;
+  sourceFascistCount: number;
+  presidentSeat: number;
+}
+
+export type ExecutiveResolution =
+  | { kind: "EXECUTION"; targetId: string }
+  | { kind: "INVESTIGATE_LOYALTY"; targetId: string }
+  | { kind: "SPECIAL_ELECTION"; presidentSeat: number }
+  | { kind: "POLICY_PEEK" };
+
 export interface PowerSlot {
   fascistCount: 1 | 2 | 3 | 4 | 5;
   power: ExecutivePower;
@@ -161,4 +191,5 @@ export interface ThemeManifest {
   cardBack: string;
   deadPlayerOverlayImage: string;
   botColorImages: Record<BotColor, string>;
+  winnerBannerByReason: Record<WinReason, string>;
 }

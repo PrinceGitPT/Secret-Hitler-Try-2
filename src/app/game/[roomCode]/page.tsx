@@ -12,7 +12,7 @@ import {
   type RoomStateResponse
 } from "@/lib/client/api";
 import { getStoredPlayerId } from "@/lib/client/playerIdentity";
-import type { GameAction, ThemeManifest } from "@/lib/game/types";
+import type { ExecutiveResolution, GameAction, ThemeManifest } from "@/lib/game/types";
 import type { PublicChatMessage } from "@/lib/chat/types";
 import { listThemes } from "@/lib/themes/manifest";
 
@@ -239,6 +239,17 @@ export default function GamePage() {
                 type: "CHANCELLOR_DISCARD",
                 actorId,
                 cardIndex: cardIndex as 0 | 1
+              });
+            }}
+            onResolveExecutivePower={(resolution: ExecutiveResolution) => {
+              if (!actorId) {
+                return;
+              }
+
+              void submitAction({
+                type: "RESOLVE_EXECUTIVE_POWER",
+                actorId,
+                resolution
               });
             }}
             chatMessages={chatMessages}

@@ -1,5 +1,6 @@
 import {
   getChancellor,
+  getEligibleExecutionTargets,
   getEligibleNominees,
   getPlayerById,
   getPresident,
@@ -43,22 +44,59 @@ export function deriveEligibleActions(room: Room, actorId?: string): EligibleAct
       canVote: false,
       hasVoted: false,
       canPresidentDiscard: false,
-      canChancellorDiscard: false
+      canChancellorDiscard: false,
+      canResolveExecutivePower: false,
+      eligibleExecutiveTargets: []
+    };
+  }
+
+  if (game.phase === "GAME_OVER") {
+    return {
+      canStart: false,
+      canUpdateConfig: false,
+      canNominate: false,
+      eligibleNomineeIds: [],
+      canVote: false,
+      hasVoted: false,
+      canPresidentDiscard: false,
+      canChancellorDiscard: false,
+      canResolveExecutivePower: false,
+      eligibleExecutiveTargets: []
     };
   }
 
   const president = getPresident(room);
   const chancellor = getChancellor(room);
+  const isAlive = actor.alive !== false;
   const canNominate =
-    game.phase === "NOMINATION" && president?.id === actor.id && !actor.isBot && getEligibleNominees(room).length > 0;
-  const canVote = game.phase === "VOTING" && !actor.isBot && !hasActorVoted(game, actor.id);
+    game.phase === "NOMINATION" &&
+    president?.id === actor.id &&
+    !actor.isBot &&
+    isAlive &&
+    getEligibleNominees(room).length > 0;
+  const canVote = game.phase === "VOTING" && !actor.isBot && isAlive && !hasActorVoted(game, actor.id);
   const canPresidentDiscard =
-    game.phase === "LEGISLATIVE_PRESIDENT" && president?.id === actor.id && !actor.isBot && game.legislativeHand?.length === 3;
+    game.phase === "LEGISLATIVE_PRESIDENT" &&
+    president?.id === actor.id &&
+    !actor.isBot &&
+    isAlive &&
+    game.legislativeHand?.length === 3;
   const canChancellorDiscard =
     game.phase === "LEGISLATIVE_CHANCELLOR" &&
     chancellor?.id === actor.id &&
     !actor.isBot &&
+    isAlive &&
     game.legislativeHand?.length === 2;
+  const canResolveExecutivePower =
+    game.phase === "EXECUTIVE_ACTION" &&
+    Boolean(game.pendingExecutivePower) &&
+    president?.id === actor.id &&
+    !actor.isBot &&
+    isAlive;
+  const eligibleExecutiveTargets =
+    canResolveExecutivePower && game.pendingExecutivePower?.power === "EXECUTION"
+      ? getEligibleExecutionTargets(room).map((player) => player.id)
+      : [];
 
   return {
     canStart: actor.id === room.hostId && !room.locked,
@@ -68,7 +106,9 @@ export function deriveEligibleActions(room: Room, actorId?: string): EligibleAct
     canVote,
     hasVoted: hasActorVoted(game, actor.id),
     canPresidentDiscard,
-    canChancellorDiscard
+    canChancellorDiscard,
+    canResolveExecutivePower,
+    eligibleExecutiveTargets
   };
 }
 

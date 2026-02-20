@@ -23,6 +23,12 @@ const theme: ThemeManifest = {
     PINK: "/themes/classic/bots/pink.svg",
     BROWN: "/themes/classic/bots/brown.svg",
     GRAY: "/themes/classic/bots/gray.svg"
+  },
+  winnerBannerByReason: {
+    LIBERAL_POLICY: "/themes/classic/winner-liberal-policy.svg",
+    FASCIST_POLICY: "/themes/classic/winner-fascist-policy.svg",
+    HITLER_ELECTED_CHANCELLOR: "/themes/classic/winner-hitler-elected.svg",
+    HITLER_EXECUTED: "/themes/classic/winner-hitler-executed.svg"
   }
 };
 
@@ -48,6 +54,7 @@ function makeRoom(phase: Phase): PublicRoom {
       discardPile: ["LIBERAL"],
       liberalEnacted: 1,
       fascistEnacted: 2,
+      electionTracker: 0,
       pendingVotes: {},
       legislativeHand: phase === "LEGISLATIVE_PRESIDENT" ? ["LIBERAL", "FASCIST", "FASCIST"] : undefined,
       enactmentSequence: 2
@@ -68,6 +75,8 @@ function makeEligible(overrides?: Partial<EligibleActions>): EligibleActions {
     hasVoted: false,
     canPresidentDiscard: false,
     canChancellorDiscard: false,
+    canResolveExecutivePower: false,
+    eligibleExecutiveTargets: [],
     ...overrides
   };
 }
@@ -94,6 +103,7 @@ describe("tabletop layout", () => {
         onVote={vi.fn()}
         onPresidentDiscard={vi.fn()}
         onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
         {...chatProps}
       />
     );
@@ -118,6 +128,7 @@ describe("tabletop layout", () => {
         onVote={vi.fn()}
         onPresidentDiscard={vi.fn()}
         onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
         {...chatProps}
       />
     );
@@ -126,6 +137,7 @@ describe("tabletop layout", () => {
     expect(topPanel).toBeInTheDocument();
     expect(screen.getByText("Vote")).toBeInTheDocument();
     expect(screen.getByText("Votes submitted: 2/5")).toBeInTheDocument();
+    expect(screen.getByText("Election Tracker: 0/3")).toBeInTheDocument();
     expect(container.querySelector(".action-bar")).not.toBeInTheDocument();
   });
 
@@ -142,6 +154,7 @@ describe("tabletop layout", () => {
         onVote={vi.fn()}
         onPresidentDiscard={vi.fn()}
         onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
         {...chatProps}
       />
     );
@@ -164,6 +177,7 @@ describe("tabletop layout", () => {
         onVote={vi.fn()}
         onPresidentDiscard={vi.fn()}
         onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
         {...chatProps}
       />
     );
@@ -173,5 +187,62 @@ describe("tabletop layout", () => {
     expect(board).toBeInTheDocument();
     expect(seats).toBeInTheDocument();
     expect(Boolean(board && seats && (board.compareDocumentPosition(seats) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  });
+
+  it("renders executive action panel with execution targets", () => {
+    const room = makeRoom("EXECUTIVE_ACTION");
+    room.game!.pendingExecutivePower = {
+      power: "EXECUTION",
+      sourceFascistCount: 4,
+      presidentSeat: 1
+    };
+    const onResolveExecutivePower = vi.fn();
+    const eligible = makeEligible({
+      canResolveExecutivePower: true,
+      eligibleExecutiveTargets: ["p2", "b1"]
+    });
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={onResolveExecutivePower}
+        {...chatProps}
+      />
+    );
+
+    expect(screen.getByText("Executive Action")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Execute Target" })).toBeInTheDocument();
+  });
+
+  it("renders winner banner in game over phase", () => {
+    const room = makeRoom("GAME_OVER");
+    room.game!.winner = "LIBERAL";
+    room.game!.winReason = "HITLER_EXECUTED";
+    const eligible = makeEligible();
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
+        {...chatProps}
+      />
+    );
+
+    expect(screen.getByText("LIBERAL Victory")).toBeInTheDocument();
+    expect(screen.getByText("Hitler was executed.")).toBeInTheDocument();
   });
 });

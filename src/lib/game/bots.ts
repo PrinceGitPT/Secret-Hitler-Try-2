@@ -1,6 +1,6 @@
 import { GameInvariantError } from "@/lib/game/errors";
 import { chooseUniform, type RandomSource, systemRandom } from "@/lib/game/random";
-import { getEligibleNominees } from "@/lib/game/rules";
+import { getEligibleExecutionTargets, getEligibleNominees } from "@/lib/game/rules";
 import type { Policy, Room, Vote } from "@/lib/game/types";
 
 export function chooseBotNominee(room: Room, rng: RandomSource = systemRandom): string {
@@ -24,4 +24,13 @@ export function chooseBotDiscardIndex(hand: Policy[], rng: RandomSource = system
   }
   const indices = Array.from({ length: hand.length }, (_, index) => index);
   return chooseUniform(indices, rng);
+}
+
+export function chooseBotExecutionTarget(room: Room, rng: RandomSource = systemRandom): string {
+  const targets = getEligibleExecutionTargets(room);
+  if (targets.length === 0) {
+    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "No eligible execution targets for bot.");
+  }
+
+  return chooseUniform(targets, rng).id;
 }
