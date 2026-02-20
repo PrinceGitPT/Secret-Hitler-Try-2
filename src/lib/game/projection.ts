@@ -1,7 +1,9 @@
 import {
   getChancellor,
   getEligibleExecutionTargets,
+  getEligibleInvestigateTargets,
   getEligibleNominees,
+  getEligibleSpecialElectionCandidates,
   getPlayerById,
   getPresident,
   hasActorVoted
@@ -9,11 +11,14 @@ import {
 import type {
   EligibleActions,
   KnownFactionMember,
+  PublicGameState,
   PublicPlayer,
+  PublicPendingExecutivePower,
   PublicRoom,
   Role,
   Room,
-  ViewerIdentity
+  ViewerIdentity,
+  ViewerPrivateState
 } from "@/lib/game/types";
 
 function toPublicPlayers(room: Room): PublicPlayer[] {
@@ -31,38 +36,70 @@ function toPublicPlayers(room: Room): PublicPlayer[] {
     .sort((a, b) => a.seat - b.seat);
 }
 
+function toPublicPendingExecutivePower(room: Room): PublicPendingExecutivePower | undefined {
+  const pending = room.game?.pendingExecutivePower;
+  if (!pending) {
+    return undefined;
+  }
+
+  return {
+    power: pending.power,
+    sourceFascistCount: pending.sourceFascistCount,
+    presidentSeat: pending.presidentSeat
+  };
+}
+
+function toPublicGame(room: Room): PublicGameState | undefined {
+  if (!room.game) {
+    return undefined;
+  }
+
+  return {
+    phase: room.game.phase,
+    presidentSeat: room.game.presidentSeat,
+    chancellorSeat: room.game.chancellorSeat,
+    liberalEnacted: room.game.liberalEnacted,
+    fascistEnacted: room.game.fascistEnacted,
+    electionTracker: room.game.electionTracker,
+    pendingVotesCount: Object.keys(room.game.pendingVotes).length,
+    drawPileCount: room.game.drawPile.length,
+    discardPileCount: room.game.discardPile.length,
+    pendingExecutivePower: toPublicPendingExecutivePower(room),
+    lastEnactedPolicy: room.game.lastEnactedPolicy,
+    enactmentSequence: room.game.enactmentSequence,
+    winner: room.game.winner,
+    winReason: room.game.winReason
+  };
+}
+
+function noActions(canStart = false, canUpdateConfig = false): EligibleActions {
+  return {
+    canStart,
+    canUpdateConfig,
+    canNominate: false,
+    eligibleNomineeIds: [],
+    canVote: false,
+    hasVoted: false,
+    canPresidentDiscard: false,
+    canChancellorDiscard: false,
+    canResolveExecutivePower: false,
+    eligibleExecutiveTargets: [],
+    eligibleInvestigateTargetIds: [],
+    eligibleSpecialElectionSeatNumbers: [],
+    canAcknowledgePolicyPeek: false
+  };
+}
+
 export function deriveEligibleActions(room: Room, actorId?: string): EligibleActions {
   const actor = actorId ? getPlayerById(room, actorId) : undefined;
   const game = room.game;
 
   if (!actor || !game) {
-    return {
-      canStart: actor?.id === room.hostId && !room.locked,
-      canUpdateConfig: actor?.id === room.hostId && !room.locked,
-      canNominate: false,
-      eligibleNomineeIds: [],
-      canVote: false,
-      hasVoted: false,
-      canPresidentDiscard: false,
-      canChancellorDiscard: false,
-      canResolveExecutivePower: false,
-      eligibleExecutiveTargets: []
-    };
+    return noActions(actor?.id === room.hostId && !room.locked, actor?.id === room.hostId && !room.locked);
   }
 
   if (game.phase === "GAME_OVER") {
-    return {
-      canStart: false,
-      canUpdateConfig: false,
-      canNominate: false,
-      eligibleNomineeIds: [],
-      canVote: false,
-      hasVoted: false,
-      canPresidentDiscard: false,
-      canChancellorDiscard: false,
-      canResolveExecutivePower: false,
-      eligibleExecutiveTargets: []
-    };
+    return noActions(false, false);
   }
 
   const president = getPresident(room);
@@ -93,10 +130,8 @@ export function deriveEligibleActions(room: Room, actorId?: string): EligibleAct
     president?.id === actor.id &&
     !actor.isBot &&
     isAlive;
-  const eligibleExecutiveTargets =
-    canResolveExecutivePower && game.pendingExecutivePower?.power === "EXECUTION"
-      ? getEligibleExecutionTargets(room).map((player) => player.id)
-      : [];
+
+  const pendingPower = canResolveExecutivePower ? game.pendingExecutivePower?.power : undefined;
 
   return {
     canStart: actor.id === room.hostId && !room.locked,
@@ -108,7 +143,52 @@ export function deriveEligibleActions(room: Room, actorId?: string): EligibleAct
     canPresidentDiscard,
     canChancellorDiscard,
     canResolveExecutivePower,
-    eligibleExecutiveTargets
+    eligibleExecutiveTargets:
+      pendingPower === "EXECUTION" ? getEligibleExecutionTargets(room).map((player) => player.id) : [],
+    eligibleInvestigateTargetIds:
+      pendingPower === "INVESTIGATE_LOYALTY"
+        ? getEligibleInvestigateTargets(room, actor.id).map((player) => player.id)
+        : [],
+    eligibleSpecialElectionSeatNumbers:
+      pendingPower === "SPECIAL_ELECTION"
+        ? getEligibleSpecialElectionCandidates(room, actor.id).map((player) => player.seat)
+        : [],
+    canAcknowledgePolicyPeek: pendingPower === "POLICY_PEEK"
+  };
+}
+
+export function deriveViewerPrivateState(room: Room, actorId?: string): ViewerPrivateState | undefined {
+  if (!room.game || !actorId) {
+    return undefined;
+  }
+
+  const actor = getPlayerById(room, actorId);
+  if (!actor) {
+    return undefined;
+  }
+
+  const game = room.game;
+  const president = getPresident(room);
+  const chancellor = getChancellor(room);
+
+  const canSeePresidentialHand =
+    game.phase === "LEGISLATIVE_PRESIDENT" && president?.id === actor.id && game.legislativeHand?.length === 3;
+  const canSeeChancellorHand =
+    game.phase === "LEGISLATIVE_CHANCELLOR" && chancellor?.id === actor.id && game.legislativeHand?.length === 2;
+
+  const legislativeHand = canSeePresidentialHand || canSeeChancellorHand ? [...(game.legislativeHand ?? [])] : undefined;
+
+  const activePolicyPeekCards =
+    game.phase === "EXECUTIVE_ACTION" &&
+    game.pendingExecutivePower?.power === "POLICY_PEEK" &&
+    president?.id === actor.id
+      ? [...(game.pendingExecutivePower.policyPeekCards ?? [])]
+      : undefined;
+
+  return {
+    legislativeHand,
+    activePolicyPeekCards,
+    executiveIntelLog: [...(game.executiveIntelLogByPlayer[actor.id] ?? [])]
   };
 }
 
@@ -120,7 +200,7 @@ export function toPublicRoom(room: Room): PublicRoom {
     players: toPublicPlayers(room),
     hostId: room.hostId,
     locked: room.locked,
-    game: room.game,
+    game: toPublicGame(room),
     createdAt: room.createdAt,
     updatedAt: room.updatedAt,
     version: room.version
@@ -143,11 +223,7 @@ function knownFactionMembersForActor(room: Room, actorId: string): KnownFactionM
 
   if (actor.role === "FASCIST") {
     return room.players
-      .filter(
-        (player) =>
-          player.id !== actor.id &&
-          (player.role === "FASCIST" || player.role === "HITLER")
-      )
+      .filter((player) => player.id !== actor.id && (player.role === "FASCIST" || player.role === "HITLER"))
       .map<KnownFactionMember>((player) => {
         const role: KnownFactionMember["role"] = player.role === "HITLER" ? "HITLER" : "FASCIST";
         return {

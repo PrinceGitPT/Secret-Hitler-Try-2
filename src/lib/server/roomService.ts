@@ -3,7 +3,7 @@ import { buildAutoExecutiveResolution } from "@/lib/game/executive";
 import { postBotPhaseMessage } from "@/lib/server/chatService";
 import { GameInvariantError } from "@/lib/game/errors";
 import { dispatchExecutivePower } from "@/lib/game/powers/dispatcher";
-import { deriveEligibleActions, deriveViewerIdentity, toPublicRoom } from "@/lib/game/projection";
+import { deriveEligibleActions, deriveViewerIdentity, deriveViewerPrivateState, toPublicRoom } from "@/lib/game/projection";
 import { systemRandom, type RandomSource } from "@/lib/game/random";
 import { getChancellor, getPlayerById, getPresident, sortedPlayers } from "@/lib/game/rules";
 import { chooseBotDiscardIndex, chooseBotNominee, chooseBotVote } from "@/lib/game/bots";
@@ -70,7 +70,8 @@ function normalizeRoom(room: Room): Room {
     legacy.drawPile === undefined ||
     legacy.discardPile === undefined ||
     legacy.liberalEnacted === undefined ||
-    legacy.fascistEnacted === undefined;
+    legacy.fascistEnacted === undefined ||
+    legacy.executiveIntelLogByPlayer === undefined;
 
   if (!changed && !gameChanged) {
     return room;
@@ -89,7 +90,10 @@ function normalizeRoom(room: Room): Room {
     legislativeHand: legacy.legislativeHand,
     lastElectedPresidentSeat: legacy.lastElectedPresidentSeat,
     lastElectedChancellorSeat: legacy.lastElectedChancellorSeat,
+    specialElectionNextPresidentSeat: legacy.specialElectionNextPresidentSeat,
+    specialElectionReturnSeat: legacy.specialElectionReturnSeat,
     pendingExecutivePower: legacy.pendingExecutivePower,
+    executiveIntelLogByPlayer: legacy.executiveIntelLogByPlayer ?? {},
     lastEnactedPolicy: legacy.lastEnactedPolicy,
     enactmentSequence: legacy.enactmentSequence ?? 0,
     winner: legacy.winner,
@@ -145,7 +149,7 @@ function nextSystemAction(room: Room, rng: RandomSource): GameAction | null {
       return null;
     }
 
-    if (game.pendingExecutivePower.power !== "EXECUTION" || president.isBot) {
+    if (president.isBot) {
       return {
         type: "RESOLVE_EXECUTIVE_POWER",
         actorId: president.id,
@@ -316,7 +320,8 @@ export async function createRoomService(
       room: toPublicRoom(created.room),
       eligible: deriveEligibleActions(created.room, created.host.id),
       actorId: created.host.id,
-      viewer: deriveViewerIdentity(created.room, created.host.id)
+      viewer: deriveViewerIdentity(created.room, created.host.id),
+      viewerPrivate: deriveViewerPrivateState(created.room, created.host.id)
     },
     actorId: created.host.id
   };
@@ -339,7 +344,8 @@ export async function joinRoomService(
       room: toPublicRoom(joined.room),
       eligible: deriveEligibleActions(joined.room, joined.player.id),
       actorId: joined.player.id,
-      viewer: deriveViewerIdentity(joined.room, joined.player.id)
+      viewer: deriveViewerIdentity(joined.room, joined.player.id),
+      viewerPrivate: deriveViewerPrivateState(joined.room, joined.player.id)
     },
     actorId: joined.player.id
   };
@@ -382,7 +388,8 @@ export async function updateRoomConfigService(params: {
     room: toPublicRoom(updated),
     eligible: deriveEligibleActions(updated, params.actorId),
     actorId: params.actorId,
-    viewer: deriveViewerIdentity(updated, params.actorId)
+    viewer: deriveViewerIdentity(updated, params.actorId),
+    viewerPrivate: deriveViewerPrivateState(updated, params.actorId)
   };
 }
 
@@ -417,7 +424,8 @@ export async function startRoomService(params: {
     room: toPublicRoom(resolved),
     eligible: deriveEligibleActions(resolved, params.actorId),
     actorId: params.actorId,
-    viewer: deriveViewerIdentity(resolved, params.actorId)
+    viewer: deriveViewerIdentity(resolved, params.actorId),
+    viewerPrivate: deriveViewerPrivateState(resolved, params.actorId)
   };
 }
 
@@ -432,6 +440,7 @@ export async function getRoomStateService(params: {
     eligible: deriveEligibleActions(room, params.actorId),
     actorId: params.actorId,
     viewer: deriveViewerIdentity(room, params.actorId),
+    viewerPrivate: deriveViewerPrivateState(room, params.actorId),
     themes: listThemes(),
     theme: getThemeById(room.themeId)
   };
@@ -465,6 +474,7 @@ export async function submitActionService(params: {
     room: toPublicRoom(resolved),
     eligible: deriveEligibleActions(resolved, params.action.actorId),
     actorId: params.action.actorId,
-    viewer: deriveViewerIdentity(resolved, params.action.actorId)
+    viewer: deriveViewerIdentity(resolved, params.action.actorId),
+    viewerPrivate: deriveViewerPrivateState(resolved, params.action.actorId)
   };
 }

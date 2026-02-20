@@ -1,8 +1,14 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TabletopLayout } from "@/components/game/TabletopLayout";
-import type { EligibleActions, Phase, PublicRoom, ThemeManifest } from "@/lib/game/types";
+import type {
+  EligibleActions,
+  Phase,
+  PublicRoom,
+  ThemeManifest,
+  ViewerPrivateState
+} from "@/lib/game/types";
 
 const theme: ThemeManifest = {
   id: "classic",
@@ -50,13 +56,13 @@ function makeRoom(phase: Phase): PublicRoom {
       phase,
       presidentSeat: 1,
       chancellorSeat: 2,
-      drawPile: ["LIBERAL", "FASCIST", "FASCIST"],
-      discardPile: ["LIBERAL"],
       liberalEnacted: 1,
       fascistEnacted: 2,
       electionTracker: 0,
-      pendingVotes: {},
-      legislativeHand: phase === "LEGISLATIVE_PRESIDENT" ? ["LIBERAL", "FASCIST", "FASCIST"] : undefined,
+      pendingVotesCount: phase === "VOTING" ? 2 : 0,
+      drawPileCount: 11,
+      discardPileCount: 4,
+      pendingExecutivePower: undefined,
       enactmentSequence: 2
     },
     createdAt: 0,
@@ -77,6 +83,9 @@ function makeEligible(overrides?: Partial<EligibleActions>): EligibleActions {
     canChancellorDiscard: false,
     canResolveExecutivePower: false,
     eligibleExecutiveTargets: [],
+    eligibleInvestigateTargetIds: [],
+    eligibleSpecialElectionSeatNumbers: [],
+    canAcknowledgePolicyPeek: false,
     ...overrides
   };
 }
@@ -88,6 +97,13 @@ const chatProps = {
   chatBusy: false,
   onSendChat: vi.fn()
 };
+
+function makeViewerPrivate(overrides?: Partial<ViewerPrivateState>): ViewerPrivateState {
+  return {
+    executiveIntelLog: [],
+    ...overrides
+  };
+}
 
 describe("tabletop layout", () => {
   it("renders nomination in the top election panel and hides bottom action bar", () => {
@@ -116,7 +132,6 @@ describe("tabletop layout", () => {
 
   it("renders vote in the top election panel", () => {
     const room = makeRoom("VOTING");
-    room.game!.pendingVotes = { p1: "JA", p2: "NEIN" };
     const eligible = makeEligible({ canVote: true });
     const { container } = render(
       <TabletopLayout
@@ -150,6 +165,7 @@ describe("tabletop layout", () => {
         theme={theme}
         eligible={eligible}
         actorId="p1"
+        viewerPrivate={makeViewerPrivate({ legislativeHand: ["LIBERAL", "FASCIST", "FASCIST"] })}
         onNominate={vi.fn()}
         onVote={vi.fn()}
         onPresidentDiscard={vi.fn()}
@@ -189,7 +205,7 @@ describe("tabletop layout", () => {
     expect(Boolean(board && seats && (board.compareDocumentPosition(seats) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
   });
 
-  it("renders executive action panel with execution targets", () => {
+  it("renders execution controls in executive action panel", () => {
     const room = makeRoom("EXECUTIVE_ACTION");
     room.game!.pendingExecutivePower = {
       power: "EXECUTION",
@@ -217,8 +233,107 @@ describe("tabletop layout", () => {
       />
     );
 
-    expect(screen.getByText("Executive Action")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Execute Target" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Execute Target" }));
+    expect(onResolveExecutivePower).toHaveBeenCalledWith({ kind: "EXECUTION", targetId: "p2" });
+  });
+
+  it("renders investigate controls in executive action panel", () => {
+    const room = makeRoom("EXECUTIVE_ACTION");
+    room.game!.pendingExecutivePower = {
+      power: "INVESTIGATE_LOYALTY",
+      sourceFascistCount: 2,
+      presidentSeat: 1
+    };
+    const onResolveExecutivePower = vi.fn();
+    const eligible = makeEligible({
+      canResolveExecutivePower: true,
+      eligibleInvestigateTargetIds: ["p2", "b1"]
+    });
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={onResolveExecutivePower}
+        {...chatProps}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Investigate" }));
+    expect(onResolveExecutivePower).toHaveBeenCalledWith({ kind: "INVESTIGATE_LOYALTY", targetId: "p2" });
+  });
+
+  it("renders special election controls in executive action panel", () => {
+    const room = makeRoom("EXECUTIVE_ACTION");
+    room.game!.pendingExecutivePower = {
+      power: "SPECIAL_ELECTION",
+      sourceFascistCount: 3,
+      presidentSeat: 1
+    };
+    const onResolveExecutivePower = vi.fn();
+    const eligible = makeEligible({
+      canResolveExecutivePower: true,
+      eligibleSpecialElectionSeatNumbers: [2, 3]
+    });
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={onResolveExecutivePower}
+        {...chatProps}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose President" }));
+    expect(onResolveExecutivePower).toHaveBeenCalledWith({ kind: "SPECIAL_ELECTION", presidentSeat: 2 });
+  });
+
+  it("renders policy peek cards for the acting president", () => {
+    const room = makeRoom("EXECUTIVE_ACTION");
+    room.game!.pendingExecutivePower = {
+      power: "POLICY_PEEK",
+      sourceFascistCount: 3,
+      presidentSeat: 1
+    };
+    const onResolveExecutivePower = vi.fn();
+    const eligible = makeEligible({
+      canResolveExecutivePower: true,
+      canAcknowledgePolicyPeek: true
+    });
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        viewerPrivate={makeViewerPrivate({ activePolicyPeekCards: ["LIBERAL", "FASCIST", "FASCIST"] })}
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={onResolveExecutivePower}
+        {...chatProps}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Acknowledge Peek" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "LIBERAL" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge Peek" }));
+    expect(onResolveExecutivePower).toHaveBeenCalledWith({ kind: "POLICY_PEEK" });
   });
 
   it("renders winner banner in game over phase", () => {
@@ -244,5 +359,38 @@ describe("tabletop layout", () => {
 
     expect(screen.getByText("LIBERAL Victory")).toBeInTheDocument();
     expect(screen.getByText("Hitler was executed.")).toBeInTheDocument();
+  });
+
+  it("renders private executive intel history in side rail", () => {
+    const room = makeRoom("NOMINATION");
+    const eligible = makeEligible();
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        viewerPrivate={makeViewerPrivate({
+          executiveIntelLog: [
+            {
+              id: "intel_1",
+              power: "INVESTIGATE_LOYALTY",
+              createdAt: 1,
+              summary: "Investigated Player 2: LIBERAL party."
+            }
+          ]
+        })}
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
+        {...chatProps}
+      />
+    );
+
+    expect(screen.getByText("Private Intel Log")).toBeInTheDocument();
+    expect(screen.getByText("Investigated Player 2: LIBERAL party.")).toBeInTheDocument();
   });
 });

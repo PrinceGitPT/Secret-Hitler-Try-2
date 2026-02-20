@@ -72,7 +72,10 @@ export interface GameState {
   legislativeHand?: Policy[];
   lastElectedPresidentSeat?: number;
   lastElectedChancellorSeat?: number;
+  specialElectionNextPresidentSeat?: number;
+  specialElectionReturnSeat?: number;
   pendingExecutivePower?: PendingExecutivePower;
+  executiveIntelLogByPlayer: Record<string, ExecutiveIntelEntry[]>;
   lastEnactedPolicy?: Policy;
   enactmentSequence: number;
   winner?: WinnerTeam;
@@ -110,7 +113,7 @@ export interface PublicRoom {
   players: PublicPlayer[];
   hostId: string;
   locked: boolean;
-  game?: GameState;
+  game?: PublicGameState;
   createdAt: number;
   updatedAt: number;
   version: number;
@@ -134,6 +137,9 @@ export interface EligibleActions {
   canChancellorDiscard: boolean;
   canResolveExecutivePower: boolean;
   eligibleExecutiveTargets: string[];
+  eligibleInvestigateTargetIds: string[];
+  eligibleSpecialElectionSeatNumbers: number[];
+  canAcknowledgePolicyPeek: boolean;
 }
 
 export interface RoomProjection {
@@ -141,6 +147,7 @@ export interface RoomProjection {
   eligible: EligibleActions;
   actorId?: string;
   viewer?: ViewerIdentity;
+  viewerPrivate?: ViewerPrivateState;
 }
 
 export interface KnownFactionMember {
@@ -167,6 +174,7 @@ export interface PendingExecutivePower {
   power: ExecutivePower;
   sourceFascistCount: number;
   presidentSeat: number;
+  policyPeekCards?: Policy[];
 }
 
 export type ExecutiveResolution =
@@ -174,6 +182,42 @@ export type ExecutiveResolution =
   | { kind: "INVESTIGATE_LOYALTY"; targetId: string }
   | { kind: "SPECIAL_ELECTION"; presidentSeat: number }
   | { kind: "POLICY_PEEK" };
+
+export interface ExecutiveIntelEntry {
+  id: string;
+  power: Exclude<ExecutivePower, "NONE">;
+  createdAt: number;
+  summary: string;
+}
+
+export interface ViewerPrivateState {
+  legislativeHand?: Policy[];
+  activePolicyPeekCards?: Policy[];
+  executiveIntelLog: ExecutiveIntelEntry[];
+}
+
+export interface PublicPendingExecutivePower {
+  power: ExecutivePower;
+  sourceFascistCount: number;
+  presidentSeat: number;
+}
+
+export interface PublicGameState {
+  phase: Phase;
+  presidentSeat: number;
+  chancellorSeat?: number;
+  liberalEnacted: number;
+  fascistEnacted: number;
+  electionTracker: number;
+  pendingVotesCount: number;
+  drawPileCount: number;
+  discardPileCount: number;
+  pendingExecutivePower?: PublicPendingExecutivePower;
+  lastEnactedPolicy?: Policy;
+  enactmentSequence: number;
+  winner?: WinnerTeam;
+  winReason?: WinReason;
+}
 
 export interface PowerSlot {
   fascistCount: 1 | 2 | 3 | 4 | 5;

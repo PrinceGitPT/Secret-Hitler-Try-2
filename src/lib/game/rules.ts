@@ -52,6 +52,14 @@ export function getEligibleExecutionTargets(room: Room): Player[] {
   return sortedPlayers(room).filter((player) => isAlive(player));
 }
 
+export function getEligibleInvestigateTargets(room: Room, presidentId: string): Player[] {
+  return sortedPlayers(room).filter((player) => isAlive(player) && player.id !== presidentId);
+}
+
+export function getEligibleSpecialElectionCandidates(room: Room, presidentId: string): Player[] {
+  return sortedPlayers(room).filter((player) => isAlive(player) && player.id !== presidentId);
+}
+
 export function hasActorVoted(game: GameState, actorId: string): boolean {
   return Object.prototype.hasOwnProperty.call(game.pendingVotes, actorId);
 }

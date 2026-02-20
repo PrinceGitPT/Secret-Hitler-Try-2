@@ -7,8 +7,8 @@ import { PolicyBoard } from "@/components/game/PolicyBoard";
 import { VotePanel } from "@/components/game/VotePanel";
 import { LegislativePanel } from "@/components/game/LegislativePanel";
 import { FactionIntelPanel } from "@/components/game/FactionIntelPanel";
+import { ExecutiveIntelPanel } from "@/components/game/ExecutiveIntelPanel";
 import { ChatPanel } from "@/components/game/ChatPanel";
-import { PowersPanelPlaceholder } from "@/components/game/PowersPanelPlaceholder";
 import { WinnerBanner } from "@/components/game/WinnerBanner";
 import type { PublicChatMessage } from "@/lib/chat/types";
 import type {
@@ -16,7 +16,8 @@ import type {
   ExecutiveResolution,
   PublicRoom,
   ThemeManifest,
-  ViewerIdentity
+  ViewerIdentity,
+  ViewerPrivateState
 } from "@/lib/game/types";
 
 interface TabletopLayoutProps {
@@ -25,6 +26,7 @@ interface TabletopLayoutProps {
   eligible: EligibleActions;
   actorId?: string;
   viewer?: ViewerIdentity;
+  viewerPrivate?: ViewerPrivateState;
   busy?: boolean;
   onNominate: (nomineeId: string) => void;
   onVote: (vote: "JA" | "NEIN") => void;
@@ -44,6 +46,7 @@ export function TabletopLayout({
   eligible,
   actorId,
   viewer,
+  viewerPrivate,
   busy,
   onNominate,
   onVote,
@@ -57,12 +60,23 @@ export function TabletopLayout({
   onSendChat
 }: TabletopLayoutProps) {
   const eligibleNominees = useMemo(() => eligible.eligibleNomineeIds ?? [], [eligible.eligibleNomineeIds]);
-  const eligibleExecutiveTargets = useMemo(
+  const eligibleExecutionTargets = useMemo(
     () => eligible.eligibleExecutiveTargets ?? [],
     [eligible.eligibleExecutiveTargets]
   );
+  const eligibleInvestigateTargets = useMemo(
+    () => eligible.eligibleInvestigateTargetIds ?? [],
+    [eligible.eligibleInvestigateTargetIds]
+  );
+  const eligibleSpecialElectionSeats = useMemo(
+    () => eligible.eligibleSpecialElectionSeatNumbers ?? [],
+    [eligible.eligibleSpecialElectionSeatNumbers]
+  );
+
   const [nomineeId, setNomineeId] = useState<string>(eligibleNominees[0] ?? "");
-  const [executionTargetId, setExecutionTargetId] = useState<string>(eligibleExecutiveTargets[0] ?? "");
+  const [executionTargetId, setExecutionTargetId] = useState<string>(eligibleExecutionTargets[0] ?? "");
+  const [investigateTargetId, setInvestigateTargetId] = useState<string>(eligibleInvestigateTargets[0] ?? "");
+  const [specialElectionSeat, setSpecialElectionSeat] = useState<number | undefined>(eligibleSpecialElectionSeats[0]);
 
   useEffect(() => {
     if (eligibleNominees.length === 0) {
@@ -76,15 +90,37 @@ export function TabletopLayout({
   }, [eligibleNominees, nomineeId]);
 
   useEffect(() => {
-    if (eligibleExecutiveTargets.length === 0) {
+    if (eligibleExecutionTargets.length === 0) {
       setExecutionTargetId("");
       return;
     }
 
-    if (!eligibleExecutiveTargets.includes(executionTargetId)) {
-      setExecutionTargetId(eligibleExecutiveTargets[0]);
+    if (!eligibleExecutionTargets.includes(executionTargetId)) {
+      setExecutionTargetId(eligibleExecutionTargets[0]);
     }
-  }, [eligibleExecutiveTargets, executionTargetId]);
+  }, [eligibleExecutionTargets, executionTargetId]);
+
+  useEffect(() => {
+    if (eligibleInvestigateTargets.length === 0) {
+      setInvestigateTargetId("");
+      return;
+    }
+
+    if (!eligibleInvestigateTargets.includes(investigateTargetId)) {
+      setInvestigateTargetId(eligibleInvestigateTargets[0]);
+    }
+  }, [eligibleInvestigateTargets, investigateTargetId]);
+
+  useEffect(() => {
+    if (eligibleSpecialElectionSeats.length === 0) {
+      setSpecialElectionSeat(undefined);
+      return;
+    }
+
+    if (specialElectionSeat === undefined || !eligibleSpecialElectionSeats.includes(specialElectionSeat)) {
+      setSpecialElectionSeat(eligibleSpecialElectionSeats[0]);
+    }
+  }, [eligibleSpecialElectionSeats, specialElectionSeat]);
 
   const game = room.game;
 
@@ -109,7 +145,6 @@ export function TabletopLayout({
     );
   }
 
-  const votesReceived = Object.keys(game.pendingVotes).length;
   const showTopActionPanel =
     game.phase === "NOMINATION" ||
     game.phase === "VOTING" ||
@@ -124,6 +159,10 @@ export function TabletopLayout({
         ? "Fascist"
         : "Liberal"
     : undefined;
+
+  const pendingPower = game.pendingExecutivePower?.power;
+  const privateLegislativeHand = viewerPrivate?.legislativeHand ?? [];
+  const privatePolicyPeekCards = viewerPrivate?.activePolicyPeekCards ?? [];
 
   return (
     <div className="tabletop">
@@ -195,8 +234,8 @@ export function TabletopLayout({
 
               {game.phase === "VOTING" ? (
                 <VotePanel
-                  totalPlayers={room.players.length}
-                  votesReceived={votesReceived}
+                  totalPlayers={room.players.filter((player) => player.alive).length}
+                  votesReceived={game.pendingVotesCount}
                   canVote={eligible.canVote}
                   hasVoted={eligible.hasVoted}
                   onVote={onVote}
@@ -205,27 +244,32 @@ export function TabletopLayout({
               ) : null}
 
               {game.phase === "LEGISLATIVE_PRESIDENT" || game.phase === "LEGISLATIVE_CHANCELLOR" ? (
-                <LegislativePanel
-                  phase={game.phase}
-                  hand={game.legislativeHand ?? []}
-                  theme={theme}
-                  canPresidentDiscard={eligible.canPresidentDiscard}
-                  canChancellorDiscard={eligible.canChancellorDiscard}
-                  onDiscard={
-                    game.phase === "LEGISLATIVE_PRESIDENT" ? onPresidentDiscard : onChancellorDiscard
-                  }
-                  disabled={busy}
-                />
+                <div>
+                  <LegislativePanel
+                    phase={game.phase}
+                    hand={privateLegislativeHand}
+                    theme={theme}
+                    canPresidentDiscard={eligible.canPresidentDiscard}
+                    canChancellorDiscard={eligible.canChancellorDiscard}
+                    onDiscard={game.phase === "LEGISLATIVE_PRESIDENT" ? onPresidentDiscard : onChancellorDiscard}
+                    disabled={busy}
+                  />
+                  {privateLegislativeHand.length === 0 ? (
+                    <p className="info-inline" style={{ marginTop: 8 }}>
+                      Legislative cards are only visible to the acting president or chancellor.
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
 
               {game.phase === "EXECUTIVE_ACTION" ? (
-                <div>
+                <div className="executive-panel">
                   <h4>Executive Action</h4>
                   <p className="info-inline">
-                    Pending power: <strong>{game.pendingExecutivePower?.power ?? "UNKNOWN"}</strong>
+                    Pending power: <strong>{pendingPower ?? "UNKNOWN"}</strong>
                   </p>
 
-                  {game.pendingExecutivePower?.power === "EXECUTION" ? (
+                  {pendingPower === "EXECUTION" ? (
                     <div className="inline-row" style={{ marginTop: 8 }}>
                       <select
                         value={executionTargetId}
@@ -233,7 +277,7 @@ export function TabletopLayout({
                         disabled={!eligible.canResolveExecutivePower || busy}
                         style={{ minWidth: 220 }}
                       >
-                        {eligible.eligibleExecutiveTargets.map((candidateId) => {
+                        {eligibleExecutionTargets.map((candidateId) => {
                           const player = room.players.find((candidate) => candidate.id === candidateId);
                           if (!player) {
                             return null;
@@ -250,22 +294,117 @@ export function TabletopLayout({
                         type="button"
                         className="button-danger"
                         onClick={() =>
-                          executionTargetId &&
-                          onResolveExecutivePower({ kind: "EXECUTION", targetId: executionTargetId })
+                          executionTargetId && onResolveExecutivePower({ kind: "EXECUTION", targetId: executionTargetId })
                         }
                         disabled={!eligible.canResolveExecutivePower || !executionTargetId || busy}
                       >
                         Execute Target
                       </button>
-                      {!eligible.canResolveExecutivePower ? (
-                        <span className="info-inline">Waiting for current president.</span>
-                      ) : null}
                     </div>
-                  ) : (
-                    <p className="info-inline" style={{ marginTop: 8 }}>
-                      Server is resolving this placeholder power automatically.
-                    </p>
-                  )}
+                  ) : null}
+
+                  {pendingPower === "INVESTIGATE_LOYALTY" ? (
+                    <div className="inline-row" style={{ marginTop: 8 }}>
+                      <select
+                        value={investigateTargetId}
+                        onChange={(event) => setInvestigateTargetId(event.target.value)}
+                        disabled={!eligible.canResolveExecutivePower || busy}
+                        style={{ minWidth: 220 }}
+                      >
+                        {eligibleInvestigateTargets.map((candidateId) => {
+                          const player = room.players.find((candidate) => candidate.id === candidateId);
+                          if (!player) {
+                            return null;
+                          }
+                          return (
+                            <option key={candidateId} value={candidateId}>
+                              {player.name} (Seat {player.seat})
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() =>
+                          investigateTargetId &&
+                          onResolveExecutivePower({ kind: "INVESTIGATE_LOYALTY", targetId: investigateTargetId })
+                        }
+                        disabled={!eligible.canResolveExecutivePower || !investigateTargetId || busy}
+                      >
+                        Investigate
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {pendingPower === "SPECIAL_ELECTION" ? (
+                    <div className="inline-row" style={{ marginTop: 8 }}>
+                      <select
+                        value={specialElectionSeat ?? ""}
+                        onChange={(event) => setSpecialElectionSeat(Number(event.target.value))}
+                        disabled={!eligible.canResolveExecutivePower || busy}
+                        style={{ minWidth: 220 }}
+                      >
+                        {eligibleSpecialElectionSeats.map((seat) => {
+                          const player = room.players.find((candidate) => candidate.seat === seat);
+                          if (!player) {
+                            return null;
+                          }
+                          return (
+                            <option key={seat} value={seat}>
+                              {player.name} (Seat {seat})
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() =>
+                          specialElectionSeat !== undefined &&
+                          onResolveExecutivePower({ kind: "SPECIAL_ELECTION", presidentSeat: specialElectionSeat })
+                        }
+                        disabled={!eligible.canResolveExecutivePower || specialElectionSeat === undefined || busy}
+                      >
+                        Choose President
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {pendingPower === "POLICY_PEEK" ? (
+                    <div className="executive-peek" style={{ marginTop: 10 }}>
+                      <div className="legislative-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                        {privatePolicyPeekCards.map((card, index) => (
+                          <CardView key={`${card}-${index}`} theme={theme} kind={card} label={card} />
+                        ))}
+                      </div>
+
+                      {privatePolicyPeekCards.length === 0 ? (
+                        <p className="info-inline" style={{ marginTop: 8 }}>
+                          Peeked cards are visible only to the acting president.
+                        </p>
+                      ) : null}
+
+                      <div className="inline-row" style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className="button-primary"
+                          onClick={() => onResolveExecutivePower({ kind: "POLICY_PEEK" })}
+                          disabled={!eligible.canAcknowledgePolicyPeek || busy}
+                        >
+                          Acknowledge Peek
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!eligible.canResolveExecutivePower && !eligible.canAcknowledgePolicyPeek ? (
+                    <span className="info-inline" style={{ marginTop: 8, display: "block" }}>
+                      Waiting for current president.
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -285,13 +424,13 @@ export function TabletopLayout({
             <div className="deck-card">
               <h5>Draw Deck</h5>
               <CardView theme={theme} kind="BACK" label="Deck" small />
-              <p>{game.drawPile.length} cards remaining</p>
+              <p>{game.drawPileCount} cards remaining</p>
             </div>
 
             <div className="deck-card">
               <h5>Discard Pile</h5>
               <CardView theme={theme} kind="BACK" label="Discard" small />
-              <p>{game.discardPile.length} cards in discard</p>
+              <p>{game.discardPileCount} cards in discard</p>
             </div>
           </div>
 
@@ -316,7 +455,12 @@ export function TabletopLayout({
           busy={chatBusy}
           onSend={onSendChat}
         />
-        <PowersPanelPlaceholder roomSize={room.roomSize} fascistEnacted={game.fascistEnacted} />
+        <ExecutiveIntelPanel
+          roomSize={room.roomSize}
+          fascistEnacted={game.fascistEnacted}
+          viewerPrivate={viewerPrivate}
+          pendingPower={game.pendingExecutivePower?.power}
+        />
       </aside>
     </div>
   );

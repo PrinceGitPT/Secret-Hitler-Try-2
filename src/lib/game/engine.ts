@@ -16,12 +16,28 @@ import {
   getChancellor,
   getEligibleNominees,
   getPlayerById,
+  getPlayerBySeat,
   getPresident,
   hasActorVoted,
   nextSeat
 } from "@/lib/game/rules";
 import { applyGameOver, checkHitlerElectionWin, checkHitlerExecutedWin, checkPolicyWin } from "@/lib/game/win";
 import type { GameAction, GameEvent, Policy, Room } from "@/lib/game/types";
+
+function ensureDrawCapacity(room: Room, count: number, rng: RandomSource): void {
+  if (!room.game || room.game.drawPile.length >= count) {
+    return;
+  }
+
+  const game = room.game;
+  const combined = [...game.drawPile, ...game.discardPile];
+  if (combined.length < count) {
+    return;
+  }
+
+  game.drawPile = shuffle(combined, rng);
+  game.discardPile = [];
+}
 
 function drawOnePolicy(room: Room, rng: RandomSource): Policy {
   if (!room.game) {
@@ -45,7 +61,22 @@ function drawOnePolicy(room: Room, rng: RandomSource): Policy {
 }
 
 function drawPolicies(room: Room, count: number, rng: RandomSource): Policy[] {
+  ensureDrawCapacity(room, count, rng);
   return Array.from({ length: count }, () => drawOnePolicy(room, rng));
+}
+
+function peekTopPolicies(room: Room, count: number, rng: RandomSource): Policy[] {
+  if (!room.game) {
+    return [];
+  }
+
+  ensureDrawCapacity(room, count, rng);
+
+  const cards: Policy[] = [];
+  for (let index = room.game.drawPile.length - 1; index >= 0 && cards.length < count; index -= 1) {
+    cards.push(room.game.drawPile[index]);
+  }
+  return cards;
 }
 
 function clearRoundTransientState(room: Room): void {
@@ -59,6 +90,37 @@ function clearRoundTransientState(room: Room): void {
   room.game.pendingExecutivePower = undefined;
 }
 
+function resolveSeatOverride(room: Room, seat: number, fallbackFromSeat: number): number {
+  const candidate = getPlayerBySeat(room, seat);
+  if (candidate?.alive) {
+    return candidate.seat;
+  }
+
+  return nextSeat(room, fallbackFromSeat);
+}
+
+function advancePresidencyForNextRound(room: Room): void {
+  if (!room.game) {
+    return;
+  }
+
+  const game = room.game;
+
+  if (game.specialElectionNextPresidentSeat !== undefined) {
+    game.presidentSeat = resolveSeatOverride(room, game.specialElectionNextPresidentSeat, game.presidentSeat);
+    game.specialElectionNextPresidentSeat = undefined;
+    return;
+  }
+
+  if (game.specialElectionReturnSeat !== undefined) {
+    game.presidentSeat = resolveSeatOverride(room, game.specialElectionReturnSeat, game.presidentSeat);
+    game.specialElectionReturnSeat = undefined;
+    return;
+  }
+
+  game.presidentSeat = nextSeat(room, game.presidentSeat);
+}
+
 function finalizeRoundAfterVoteFailure(room: Room): void {
   if (!room.game) {
     return;
@@ -66,7 +128,7 @@ function finalizeRoundAfterVoteFailure(room: Room): void {
 
   clearRoundTransientState(room);
   room.game.phase = "NOMINATION";
-  room.game.presidentSeat = nextSeat(room, room.game.presidentSeat);
+  advancePresidencyForNextRound(room);
 }
 
 function finalizeRoundAfterEnactment(room: Room): void {
@@ -76,13 +138,14 @@ function finalizeRoundAfterEnactment(room: Room): void {
 
   clearRoundTransientState(room);
   room.game.phase = "NOMINATION";
-  room.game.presidentSeat = nextSeat(room, room.game.presidentSeat);
+  advancePresidencyForNextRound(room);
 }
 
 function enactPolicy(
   room: Room,
   policy: Policy,
   events: GameEvent[],
+  rng: RandomSource,
   options: { ignoreExecutivePower?: boolean } = {}
 ): void {
   if (!room.game) {
@@ -131,7 +194,8 @@ function enactPolicy(
   const pending = createPendingExecutivePower({
     power: slot.power,
     sourceFascistCount: slot.fascistCount,
-    presidentSeat: game.presidentSeat
+    presidentSeat: game.presidentSeat,
+    policyPeekCards: slot.power === "POLICY_PEEK" ? peekTopPolicies(room, 3, rng) : undefined
   });
 
   if (!pending) {
@@ -149,7 +213,7 @@ function resolveChaosTopDeck(room: Room, events: GameEvent[], rng: RandomSource)
 
   const game = room.game;
   const topDeckPolicy = drawOnePolicy(room, rng);
-  enactPolicy(room, topDeckPolicy, events, { ignoreExecutivePower: true });
+  enactPolicy(room, topDeckPolicy, events, rng, { ignoreExecutivePower: true });
 
   resetElectionTracker(game);
   clearLastElectedGovernment(game);
@@ -338,7 +402,7 @@ export function applyAction(
       }
 
       game.discardPile.push(discardedCard);
-      enactPolicy(nextRoom, enactedCard, events);
+      enactPolicy(nextRoom, enactedCard, events, rng);
 
       const phaseAfterEnactment = nextRoom.game?.phase;
       if (phaseAfterEnactment === "GAME_OVER" || phaseAfterEnactment === "EXECUTIVE_ACTION") {

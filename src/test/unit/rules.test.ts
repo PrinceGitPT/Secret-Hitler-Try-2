@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   allVotesSubmitted,
   countVotes,
+  getEligibleInvestigateTargets,
   getEligibleNominees,
+  getEligibleSpecialElectionCandidates,
   nextSeat
 } from "@/lib/game/rules";
 import type { Room, RoomSize } from "@/lib/game/types";
@@ -97,5 +99,18 @@ describe("rules", () => {
     };
 
     expect(allVotesSubmitted(room)).toBe(true);
+  });
+
+  it("limits investigate and special election targets to alive non-self players", () => {
+    const room = sampleRoom(7);
+    room.players.find((player) => player.id === "p4")!.alive = false;
+
+    const investigateIds = getEligibleInvestigateTargets(room, "p1").map((player) => player.id);
+    const specialElectionIds = getEligibleSpecialElectionCandidates(room, "p1").map((player) => player.id);
+
+    expect(investigateIds).not.toContain("p1");
+    expect(investigateIds).not.toContain("p4");
+    expect(specialElectionIds).not.toContain("p1");
+    expect(specialElectionIds).not.toContain("p4");
   });
 });

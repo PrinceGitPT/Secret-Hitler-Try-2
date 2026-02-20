@@ -169,7 +169,7 @@ export default function GamePage() {
               Game Room {roomCode || "..."}
             </h1>
             <p className="page-subtitle">
-              Vote and policy draw flow MVP with live room chat. Executive powers remain placeholder-only.
+              Vote, policy flow, and executive powers are live. State polling includes private intel views.
             </p>
           </div>
           <div className="inline-row">
@@ -196,6 +196,7 @@ export default function GamePage() {
             eligible={state!.eligible}
             actorId={actorId}
             viewer={state?.viewer}
+            viewerPrivate={state?.viewerPrivate}
             busy={busy}
             onNominate={(nomineeId) => {
               if (!actorId) {

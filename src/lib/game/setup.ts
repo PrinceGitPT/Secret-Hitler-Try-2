@@ -248,7 +248,10 @@ export function startGame(room: Room, rng: RandomSource = systemRandom): Room {
       pendingVotes: {},
       lastElectedPresidentSeat: undefined,
       lastElectedChancellorSeat: undefined,
+      specialElectionNextPresidentSeat: undefined,
+      specialElectionReturnSeat: undefined,
       pendingExecutivePower: undefined,
+      executiveIntelLogByPlayer: {},
       enactmentSequence: 0,
       winner: undefined,
       winReason: undefined

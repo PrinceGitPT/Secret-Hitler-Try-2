@@ -287,4 +287,155 @@ describe("room service integration", () => {
     expect(result.room.game?.lastElectedPresidentSeat).toBeUndefined();
     expect(result.room.game?.lastElectedChancellorSeat).toBeUndefined();
   });
+
+  it("stores investigate intel privately for the acting president only", async () => {
+    const room = serviceRoom({
+      code: "INVPWR",
+      game: {
+        phase: "EXECUTIVE_ACTION",
+        presidentSeat: 1,
+        pendingExecutivePower: {
+          power: "INVESTIGATE_LOYALTY",
+          sourceFascistCount: 2,
+          presidentSeat: 1
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    await submitActionService({
+      roomCode: "INVPWR",
+      action: {
+        type: "RESOLVE_EXECUTIVE_POWER",
+        actorId: "p1",
+        resolution: {
+          kind: "INVESTIGATE_LOYALTY",
+          targetId: "p4"
+        }
+      }
+    });
+
+    const p1View = await getRoomStateService({ roomCode: "INVPWR", actorId: "p1" });
+    const p2View = await getRoomStateService({ roomCode: "INVPWR", actorId: "p2" });
+
+    const p1Log = p1View.viewerPrivate?.executiveIntelLog ?? [];
+    const p2Log = p2View.viewerPrivate?.executiveIntelLog ?? [];
+
+    expect(p1Log.length).toBe(1);
+    expect(p1Log[0]?.summary).toContain("FASCIST party");
+    expect(p2Log).toHaveLength(0);
+  });
+
+  it("exposes policy peek cards only to the acting president and logs after acknowledgment", async () => {
+    const room = serviceRoom({
+      code: "PEEK01",
+      game: {
+        phase: "EXECUTIVE_ACTION",
+        presidentSeat: 1,
+        pendingExecutivePower: {
+          power: "POLICY_PEEK",
+          sourceFascistCount: 3,
+          presidentSeat: 1,
+          policyPeekCards: ["LIBERAL", "FASCIST", "LIBERAL"]
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    const p1Before = await getRoomStateService({ roomCode: "PEEK01", actorId: "p1" });
+    const p2Before = await getRoomStateService({ roomCode: "PEEK01", actorId: "p2" });
+    expect(p1Before.viewerPrivate?.activePolicyPeekCards).toEqual(["LIBERAL", "FASCIST", "LIBERAL"]);
+    expect(p2Before.viewerPrivate?.activePolicyPeekCards).toBeUndefined();
+
+    await submitActionService({
+      roomCode: "PEEK01",
+      action: {
+        type: "RESOLVE_EXECUTIVE_POWER",
+        actorId: "p1",
+        resolution: {
+          kind: "POLICY_PEEK"
+        }
+      }
+    });
+
+    const p1After = await getRoomStateService({ roomCode: "PEEK01", actorId: "p1" });
+    expect(p1After.viewerPrivate?.executiveIntelLog[0]?.summary).toContain("Peeked top policies");
+  });
+
+  it("applies special election next-president override and then returns to normal order", async () => {
+    const room = serviceRoom({
+      code: "SPECEL",
+      game: {
+        phase: "EXECUTIVE_ACTION",
+        presidentSeat: 1,
+        drawPile: ["LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL"],
+        discardPile: [],
+        pendingExecutivePower: {
+          power: "SPECIAL_ELECTION",
+          sourceFascistCount: 3,
+          presidentSeat: 1
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    const afterSpecialElection = await submitActionService({
+      roomCode: "SPECEL",
+      action: {
+        type: "RESOLVE_EXECUTIVE_POWER",
+        actorId: "p1",
+        resolution: {
+          kind: "SPECIAL_ELECTION",
+          presidentSeat: 4
+        }
+      }
+    });
+
+    expect(afterSpecialElection.room.game?.phase).toBe("NOMINATION");
+    expect(afterSpecialElection.room.game?.presidentSeat).toBe(4);
+
+    await submitActionService({
+      roomCode: "SPECEL",
+      action: {
+        type: "NOMINATE_CHANCELLOR",
+        actorId: "p4",
+        nomineeId: "p2"
+      }
+    });
+
+    for (const voterId of ["p1", "p2", "p3", "p4", "p5"]) {
+      await submitActionService({
+        roomCode: "SPECEL",
+        action: {
+          type: "CAST_VOTE",
+          actorId: voterId,
+          vote: "JA"
+        }
+      });
+    }
+
+    await submitActionService({
+      roomCode: "SPECEL",
+      action: {
+        type: "LEGISLATIVE_DISCARD",
+        actorId: "p4",
+        cardIndex: 0
+      }
+    });
+
+    const afterEnactment = await submitActionService({
+      roomCode: "SPECEL",
+      action: {
+        type: "CHANCELLOR_DISCARD",
+        actorId: "p2",
+        cardIndex: 0
+      }
+    });
+
+    expect(afterEnactment.room.game?.phase).toBe("NOMINATION");
+    expect(afterEnactment.room.game?.presidentSeat).toBe(2);
+  });
 });

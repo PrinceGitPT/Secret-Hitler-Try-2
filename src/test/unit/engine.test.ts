@@ -29,7 +29,10 @@ function baseRoom(overrides: Partial<Room> = {}): Room {
       pendingVotes: {},
       lastElectedPresidentSeat: undefined,
       lastElectedChancellorSeat: undefined,
+      specialElectionNextPresidentSeat: undefined,
+      specialElectionReturnSeat: undefined,
       pendingExecutivePower: undefined,
+      executiveIntelLogByPlayer: {},
       enactmentSequence: 0,
       winner: undefined,
       winReason: undefined
@@ -187,6 +190,66 @@ describe("engine", () => {
     expect(result.game?.phase).toBe("GAME_OVER");
     expect(result.game?.winner).toBe("LIBERAL");
     expect(result.game?.winReason).toBe("HITLER_EXECUTED");
+  });
+
+  it("applies special election override for one cycle and then returns to normal order", () => {
+    const room = baseRoom({
+      game: {
+        phase: "EXECUTIVE_ACTION",
+        presidentSeat: 1,
+        drawPile: ["LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL", "LIBERAL"],
+        discardPile: [],
+        pendingExecutivePower: {
+          power: "SPECIAL_ELECTION",
+          sourceFascistCount: 3,
+          presidentSeat: 1
+        }
+      }
+    });
+
+    const afterSpecial = applyAction(room, {
+      type: "RESOLVE_EXECUTIVE_POWER",
+      actorId: "p1",
+      resolution: {
+        kind: "SPECIAL_ELECTION",
+        presidentSeat: 4
+      }
+    }).room;
+
+    expect(afterSpecial.game?.phase).toBe("NOMINATION");
+    expect(afterSpecial.game?.presidentSeat).toBe(4);
+
+    const afterNomination = applyAction(afterSpecial, {
+      type: "NOMINATE_CHANCELLOR",
+      actorId: "p4",
+      nomineeId: "p2"
+    }).room;
+
+    const afterVotes = ["p1", "p2", "p3", "p4", "p5"].reduce((currentRoom, voterId) => {
+      return applyAction(currentRoom, {
+        type: "CAST_VOTE",
+        actorId: voterId,
+        vote: "JA"
+      }).room;
+    }, afterNomination);
+
+    expect(afterVotes.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
+    expect(afterVotes.game?.presidentSeat).toBe(4);
+
+    const afterPresidentDiscard = applyAction(afterVotes, {
+      type: "LEGISLATIVE_DISCARD",
+      actorId: "p4",
+      cardIndex: 0
+    }).room;
+
+    const afterEnactment = applyAction(afterPresidentDiscard, {
+      type: "CHANCELLOR_DISCARD",
+      actorId: "p2",
+      cardIndex: 0
+    }).room;
+
+    expect(afterEnactment.game?.phase).toBe("NOMINATION");
+    expect(afterEnactment.game?.presidentSeat).toBe(2);
   });
 
   it("rejects actions after game over", () => {

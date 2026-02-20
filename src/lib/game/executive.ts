@@ -1,16 +1,28 @@
 import { GameInvariantError } from "@/lib/game/errors";
 import { chooseUniform, systemRandom, type RandomSource } from "@/lib/game/random";
-import { getEligibleExecutionTargets, getPlayerById, getPresident, getPlayerBySeat } from "@/lib/game/rules";
+import {
+  getEligibleExecutionTargets,
+  getEligibleInvestigateTargets,
+  getEligibleSpecialElectionCandidates,
+  getPlayerById,
+  getPlayerBySeat,
+  getPresident,
+  nextSeat
+} from "@/lib/game/rules";
 import type {
+  ExecutiveIntelEntry,
   ExecutivePower,
   ExecutiveResolution,
   PendingExecutivePower,
   Player,
-  Room
+  Policy,
+  Role,
+  Room,
+  Team
 } from "@/lib/game/types";
 
-function alivePlayers(room: Room): Player[] {
-  return room.players.filter((player) => player.alive);
+interface ResolvePendingPowerResult {
+  executedTargetId?: string;
 }
 
 function assertMatchesPendingPower(pendingPower: ExecutivePower, resolution: ExecutiveResolution): void {
@@ -73,24 +85,65 @@ function validateResolveActor(room: Room, actorId: string): Player {
   return president;
 }
 
-function validateInvestigateTarget(room: Room, targetId: string): void {
-  const target = getPlayerById(room, targetId);
-  if (!target || !target.alive) {
-    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "Executive target must be an alive player.");
-  }
+function roleToPartyMembership(role: Role): Team {
+  return role === "LIBERAL" ? "LIBERAL" : "FASCIST";
 }
 
-function validateSpecialElectionSeat(room: Room, presidentSeat: number): void {
-  const target = getPlayerBySeat(room, presidentSeat);
-  if (!target || !target.alive) {
-    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "Special election seat must belong to an alive player.");
+function appendIntelEntry(room: Room, actorId: string, entry: Omit<ExecutiveIntelEntry, "id" | "createdAt">): void {
+  if (!room.game) {
+    return;
   }
+
+  const list = room.game.executiveIntelLogByPlayer[actorId] ?? [];
+  const nextEntry: ExecutiveIntelEntry = {
+    id: `intel_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    createdAt: Date.now(),
+    ...entry
+  };
+
+  room.game.executiveIntelLogByPlayer[actorId] = [...list, nextEntry];
+}
+
+function validateInvestigateTarget(room: Room, actorId: string, targetId: string): Player {
+  const eligibleTargetIds = new Set(getEligibleInvestigateTargets(room, actorId).map((player) => player.id));
+  if (!eligibleTargetIds.has(targetId)) {
+    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "Investigate target must be alive and cannot be self.");
+  }
+
+  const target = getPlayerById(room, targetId);
+  if (!target) {
+    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "Investigate target does not exist.");
+  }
+
+  return target;
+}
+
+function validateSpecialElectionSeat(room: Room, actorId: string, presidentSeat: number): Player {
+  const eligibleSeats = new Set(
+    getEligibleSpecialElectionCandidates(room, actorId)
+      .map((player) => player.seat)
+  );
+
+  if (!eligibleSeats.has(presidentSeat)) {
+    throw new GameInvariantError(
+      "INVALID_EXECUTION_TARGET",
+      "Special election seat must belong to another alive player."
+    );
+  }
+
+  const target = getPlayerBySeat(room, presidentSeat);
+  if (!target) {
+    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "Special election seat does not exist.");
+  }
+
+  return target;
 }
 
 export function createPendingExecutivePower(params: {
   power: ExecutivePower;
   sourceFascistCount: number;
   presidentSeat: number;
+  policyPeekCards?: Policy[];
 }): PendingExecutivePower | undefined {
   if (params.power === "NONE") {
     return undefined;
@@ -99,7 +152,8 @@ export function createPendingExecutivePower(params: {
   return {
     power: params.power,
     sourceFascistCount: params.sourceFascistCount,
-    presidentSeat: params.presidentSeat
+    presidentSeat: params.presidentSeat,
+    policyPeekCards: params.policyPeekCards
   };
 }
 
@@ -107,13 +161,13 @@ export function resolvePendingExecutivePower(
   room: Room,
   actorId: string,
   resolution: ExecutiveResolution
-): { executedTargetId?: string } {
+): ResolvePendingPowerResult {
   const game = room.game;
   if (!game || !game.pendingExecutivePower) {
     throw new GameInvariantError("NO_PENDING_EXECUTIVE_POWER", "No executive power is pending.");
   }
 
-  validateResolveActor(room, actorId);
+  const actor = validateResolveActor(room, actorId);
   const pending = game.pendingExecutivePower;
   assertMatchesPendingPower(pending.power, resolution);
 
@@ -130,23 +184,47 @@ export function resolvePendingExecutivePower(
       }
 
       target.alive = false;
+      appendIntelEntry(room, actor.id, {
+        power: "EXECUTION",
+        summary: `Executed ${target.name} (Seat ${target.seat}).`
+      });
       game.pendingExecutivePower = undefined;
       return { executedTargetId: target.id };
     }
 
     case "INVESTIGATE_LOYALTY": {
-      validateInvestigateTarget(room, resolution.targetId);
+      const target = validateInvestigateTarget(room, actor.id, resolution.targetId);
+      const partyMembership = roleToPartyMembership(target.role);
+      appendIntelEntry(room, actor.id, {
+        power: "INVESTIGATE_LOYALTY",
+        summary: `Investigated ${target.name}: ${partyMembership} party.`
+      });
       game.pendingExecutivePower = undefined;
       return {};
     }
 
     case "SPECIAL_ELECTION": {
-      validateSpecialElectionSeat(room, resolution.presidentSeat);
+      const target = validateSpecialElectionSeat(room, actor.id, resolution.presidentSeat);
+      game.specialElectionNextPresidentSeat = target.seat;
+      game.specialElectionReturnSeat = nextSeat(room, actor.seat);
+      appendIntelEntry(room, actor.id, {
+        power: "SPECIAL_ELECTION",
+        summary: `Selected ${target.name} (Seat ${target.seat}) as next president.`
+      });
       game.pendingExecutivePower = undefined;
       return {};
     }
 
     case "POLICY_PEEK": {
+      const cards = pending.policyPeekCards;
+      if (!cards || cards.length === 0) {
+        throw new GameInvariantError("INVALID_EXECUTIVE_RESOLUTION", "No policy peek cards are available to acknowledge.");
+      }
+
+      appendIntelEntry(room, actor.id, {
+        power: "POLICY_PEEK",
+        summary: `Peeked top policies: ${cards.join(", ")}.`
+      });
       game.pendingExecutivePower = undefined;
       return {};
     }
@@ -161,19 +239,16 @@ export function resolvePendingExecutivePower(
   }
 }
 
-function chooseAliveTarget(room: Room, rng: RandomSource = systemRandom): Player {
-  const alive = alivePlayers(room);
-  if (alive.length === 0) {
-    throw new GameInvariantError("INVALID_EXECUTION_TARGET", "No alive players available for executive resolution.");
-  }
-  return chooseUniform(alive, rng);
-}
-
 export function buildAutoExecutiveResolution(
   room: Room,
   pendingPower: PendingExecutivePower,
   rng: RandomSource = systemRandom
 ): ExecutiveResolution {
+  const president = getPresident(room);
+  if (!president) {
+    throw new GameInvariantError("NOT_PRESIDENT", "No current president available for executive resolution.");
+  }
+
   switch (pendingPower.power) {
     case "EXECUTION": {
       const eligible = getEligibleExecutionTargets(room);
@@ -187,20 +262,24 @@ export function buildAutoExecutiveResolution(
     }
 
     case "INVESTIGATE_LOYALTY": {
-      const president = getPresident(room);
-      const pool = alivePlayers(room).filter((player) => player.id !== president?.id);
-      const target = pool.length > 0 ? chooseUniform(pool, rng) : chooseAliveTarget(room, rng);
+      const candidates = getEligibleInvestigateTargets(room, president.id);
+      if (candidates.length === 0) {
+        throw new GameInvariantError("INVALID_EXECUTION_TARGET", "No investigate targets available.");
+      }
       return {
         kind: "INVESTIGATE_LOYALTY",
-        targetId: target.id
+        targetId: chooseUniform(candidates, rng).id
       };
     }
 
     case "SPECIAL_ELECTION": {
-      const target = chooseAliveTarget(room, rng);
+      const candidates = getEligibleSpecialElectionCandidates(room, president.id);
+      if (candidates.length === 0) {
+        throw new GameInvariantError("INVALID_EXECUTION_TARGET", "No special election candidates available.");
+      }
       return {
         kind: "SPECIAL_ELECTION",
-        presidentSeat: target.seat
+        presidentSeat: chooseUniform(candidates, rng).seat
       };
     }
 
