@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/server/api";
 import { getRoomChatService, postRoomChatService } from "@/lib/server/chatService";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   request: NextRequest,
   context: {

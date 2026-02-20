@@ -71,6 +71,7 @@ describe("room service integration", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("runs a full flow with multi-human and bot fill", async () => {
@@ -166,6 +167,33 @@ describe("room service integration", () => {
 
     expect(["NOMINATION", "EXECUTIVE_ACTION", "GAME_OVER"]).toContain(afterEnact.room.game?.phase);
     expect(enacted).toBe(1);
+  });
+
+  it("fails fast with KV_NOT_CONFIGURED in production when KV env vars are missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
+    resetMemoryKvForTests();
+
+    await expect(
+      createRoomService({
+        hostName: "Host",
+        roomSize: 5,
+        themeId: "classic"
+      })
+    ).rejects.toMatchObject({
+      code: "KV_NOT_CONFIGURED"
+    });
+
+    await expect(
+      getRoomStateService({
+        roomCode: "MISSING",
+        actorId: "p1"
+      })
+    ).rejects.toMatchObject({
+      code: "KV_NOT_CONFIGURED"
+    });
   });
 
   it("ends game from policy win via submitAction service", async () => {

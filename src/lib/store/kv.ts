@@ -1,5 +1,6 @@
 import type { Room } from "@/lib/game/types";
 import type { ChatMessage } from "@/lib/chat/types";
+import { GameInvariantError } from "@/lib/game/errors";
 
 const STORE_PREFIX = "secret-hitler:v1";
 const MEMORY_STORE_KEY = "__secret_hitler_mvp_memory_kv__";
@@ -10,7 +11,22 @@ interface KvBackend {
   del(key: string): Promise<void>;
 }
 
-let resolvedBackend: KvBackend | null = null;
+type StorageMode = "vercel-kv" | "memory";
+
+interface ResolvedBackend {
+  backend: KvBackend;
+  mode: StorageMode;
+}
+
+let resolvedBackend: ResolvedBackend | null = null;
+
+function isProductionRuntime(): boolean {
+  return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+}
+
+function hasVercelKvCredentials(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
 
 function getMemoryStore(): Map<string, string> {
   const globalScope = globalThis as typeof globalThis & {
@@ -43,36 +59,87 @@ function memoryBackend(): KvBackend {
   };
 }
 
-async function resolveBackend(): Promise<KvBackend> {
+function kvUnavailableError(operation: "get" | "set" | "del", key: string, cause: unknown): GameInvariantError {
+  const suffix = cause instanceof Error ? `: ${cause.message}` : "";
+  return new GameInvariantError("KV_UNAVAILABLE", `KV ${operation} failed for key ${key}${suffix}`);
+}
+
+function kvBackend(kvModule: typeof import("@vercel/kv")): KvBackend {
+  return {
+    async get<T>(key: string): Promise<T | null> {
+      try {
+        return await kvModule.kv.get<T>(key);
+      } catch (error) {
+        throw kvUnavailableError("get", key, error);
+      }
+    },
+    async set<T>(key: string, value: T): Promise<void> {
+      try {
+        await kvModule.kv.set<T>(key, value);
+      } catch (error) {
+        throw kvUnavailableError("set", key, error);
+      }
+    },
+    async del(key: string): Promise<void> {
+      try {
+        await kvModule.kv.del(key);
+      } catch (error) {
+        throw kvUnavailableError("del", key, error);
+      }
+    }
+  };
+}
+
+function kvNotConfiguredError(): GameInvariantError {
+  return new GameInvariantError(
+    "KV_NOT_CONFIGURED",
+    "Vercel KV is required in production. Configure KV_REST_API_URL and KV_REST_API_TOKEN, then redeploy."
+  );
+}
+
+async function resolveBackendWithMode(): Promise<ResolvedBackend> {
   if (resolvedBackend) {
     return resolvedBackend;
   }
 
-  const hasVercelKvCredentials = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-  if (hasVercelKvCredentials) {
+  const production = isProductionRuntime();
+  const hasCredentials = hasVercelKvCredentials();
+
+  if (hasCredentials) {
     try {
       const kvModule = await import("@vercel/kv");
 
       resolvedBackend = {
-        async get<T>(key: string): Promise<T | null> {
-          return kvModule.kv.get<T>(key);
-        },
-        async set<T>(key: string, value: T): Promise<void> {
-          await kvModule.kv.set<T>(key, value);
-        },
-        async del(key: string): Promise<void> {
-          await kvModule.kv.del(key);
-        }
+        backend: kvBackend(kvModule),
+        mode: "vercel-kv"
       };
 
       return resolvedBackend;
-    } catch {
-      // Fallback below.
+    } catch (error) {
+      if (production) {
+        const suffix = error instanceof Error ? ` (${error.message})` : "";
+        throw new GameInvariantError(
+          "KV_NOT_CONFIGURED",
+          `Vercel KV import failed in production${suffix}. Verify KV integration and redeploy.`
+        );
+      }
     }
   }
 
-  resolvedBackend = memoryBackend();
+  if (production) {
+    throw kvNotConfiguredError();
+  }
+
+  resolvedBackend = {
+    backend: memoryBackend(),
+    mode: "memory"
+  };
   return resolvedBackend;
+}
+
+async function resolveBackend(): Promise<KvBackend> {
+  const resolved = await resolveBackendWithMode();
+  return resolved.backend;
 }
 
 function roomKey(roomCode: string): string {
@@ -108,7 +175,24 @@ export async function writeRoomChat(roomCode: string, messages: ChatMessage[]): 
   await backend.set(roomChatKey(roomCode), messages);
 }
 
+export async function getStorageDiagnostics(): Promise<{
+  mode: StorageMode;
+  production: boolean;
+  hasCredentials: boolean;
+}> {
+  const resolved = await resolveBackendWithMode();
+  return {
+    mode: resolved.mode,
+    production: isProductionRuntime(),
+    hasCredentials: hasVercelKvCredentials()
+  };
+}
+
 export function resetMemoryKvForTests(): void {
   getMemoryStore().clear();
-  resolvedBackend = memoryBackend();
+  resolvedBackend = null;
+}
+
+export function resetKvResolutionForTests(): void {
+  resolvedBackend = null;
 }

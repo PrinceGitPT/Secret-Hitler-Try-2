@@ -14,10 +14,13 @@ async function parseJsonOrThrow<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T | { error?: { message?: string } };
 
   if (!response.ok) {
+    const serverMessage =
+      typeof payload === "object" && payload !== null && "error" in payload ? payload.error?.message : undefined;
     const message =
-      typeof payload === "object" && payload !== null && "error" in payload && payload.error?.message
-        ? payload.error.message
-        : `Request failed with status ${response.status}`;
+      serverMessage ??
+      (response.status === 503
+        ? "Storage is unavailable. Check Vercel KV configuration."
+        : `Request failed with status ${response.status}`);
     throw new Error(message);
   }
 
