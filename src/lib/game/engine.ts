@@ -21,6 +21,7 @@ import {
   hasActorVoted,
   nextSeat
 } from "@/lib/game/rules";
+import { isVoteRevealActive, startVoteReveal } from "@/lib/game/voteReveal";
 import { applyGameOver, checkHitlerElectionWin, checkHitlerExecutedWin, checkPolicyWin } from "@/lib/game/win";
 import type { GameAction, GameEvent, Policy, Room } from "@/lib/game/types";
 
@@ -86,6 +87,7 @@ function clearRoundTransientState(room: Room): void {
 
   room.game.chancellorSeat = undefined;
   room.game.pendingVotes = {};
+  room.game.voteReveal = undefined;
   room.game.legislativeHand = undefined;
   room.game.pendingExecutivePower = undefined;
 }
@@ -139,6 +141,25 @@ function finalizeRoundAfterEnactment(room: Room): void {
   clearRoundTransientState(room);
   room.game.phase = "NOMINATION";
   advancePresidencyForNextRound(room);
+}
+
+function resolvePassedElection(room: Room, rng: RandomSource): void {
+  if (!room.game) {
+    return;
+  }
+
+  const game = room.game;
+  recordElectedGovernment(game);
+
+  const hitlerElectionWin = checkHitlerElectionWin(room);
+  if (hitlerElectionWin) {
+    applyGameOver(game, hitlerElectionWin);
+    return;
+  }
+
+  game.phase = "LEGISLATIVE_PRESIDENT";
+  game.pendingVotes = {};
+  game.legislativeHand = drawPolicies(room, 3, rng);
 }
 
 function enactPolicy(
@@ -241,6 +262,57 @@ function processFailedElection(room: Room, events: GameEvent[], rng: RandomSourc
   finalizeRoundAfterVoteFailure(room);
 }
 
+export function advanceVoteRevealIfExpired(
+  room: Room,
+  rng: RandomSource = systemRandom,
+  now: number = Date.now()
+): { room: Room; events: GameEvent[]; advanced: boolean } {
+  if (!room.game || room.game.phase !== "VOTE_REVEAL" || !room.game.voteReveal) {
+    return {
+      room,
+      events: [],
+      advanced: false
+    };
+  }
+
+  if (isVoteRevealActive(room.game, now)) {
+    return {
+      room,
+      events: [],
+      advanced: false
+    };
+  }
+
+  const nextRoom = cloneRoom(room);
+  const events: GameEvent[] = [];
+  const game = nextRoom.game;
+  if (!game || !game.voteReveal) {
+    return {
+      room,
+      events,
+      advanced: false
+    };
+  }
+
+  const outcome = game.voteReveal.outcome;
+  game.voteReveal = undefined;
+
+  if (outcome === "PASS") {
+    resolvePassedElection(nextRoom, rng);
+  } else {
+    processFailedElection(nextRoom, events, rng);
+  }
+
+  nextRoom.updatedAt = now;
+  nextRoom.version += 1;
+
+  return {
+    room: nextRoom,
+    events,
+    advanced: true
+  };
+}
+
 export function applyAction(
   room: Room,
   action: GameAction,
@@ -257,6 +329,10 @@ export function applyAction(
 
   if (game.phase === "GAME_OVER") {
     throw new GameInvariantError("GAME_OVER", "Game is already over.");
+  }
+
+  if (game.phase === "VOTE_REVEAL") {
+    throw new GameInvariantError("VOTE_REVEAL_LOCKED", "Actions are locked while votes are revealed.");
   }
 
   switch (action.type) {
@@ -316,21 +392,7 @@ export function applyAction(
 
       if (allVotesSubmitted(nextRoom)) {
         const tally = countVotes(game.pendingVotes);
-        if (tally.ja > tally.nein) {
-          recordElectedGovernment(game);
-
-          const hitlerElectionWin = checkHitlerElectionWin(nextRoom);
-          if (hitlerElectionWin) {
-            applyGameOver(game, hitlerElectionWin);
-            break;
-          }
-
-          game.phase = "LEGISLATIVE_PRESIDENT";
-          game.pendingVotes = {};
-          game.legislativeHand = drawPolicies(nextRoom, 3, rng);
-        } else {
-          processFailedElection(nextRoom, events, rng);
-        }
+        startVoteReveal(game, game.pendingVotes, tally.ja > tally.nein ? "PASS" : "FAIL");
       }
 
       break;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveViewerPrivateState, toPublicRoom } from "@/lib/game/projection";
+import { deriveEligibleActions, deriveViewerPrivateState, toPublicRoom } from "@/lib/game/projection";
 import type { Room } from "@/lib/game/types";
 
 function roomFixture(): Room {
@@ -113,5 +113,30 @@ describe("private projection", () => {
     const p2View = deriveViewerPrivateState(room, "p2");
     expect(p2View?.executiveIntelLog).toHaveLength(1);
     expect(p2View?.executiveIntelLog[0]?.id).toBe("intel_2");
+  });
+
+  it("disables all gameplay actions during vote reveal phase", () => {
+    const room = roomFixture();
+    room.game!.phase = "VOTE_REVEAL";
+    room.game!.voteReveal = {
+      votesByPlayerId: {
+        p1: "JA",
+        p2: "NEIN",
+        p3: "JA",
+        p4: "NEIN",
+        p5: "JA"
+      },
+      outcome: "FAIL",
+      startedAt: 100,
+      endsAt: 5100
+    };
+
+    const eligible = deriveEligibleActions(room, "p1");
+
+    expect(eligible.canNominate).toBe(false);
+    expect(eligible.canVote).toBe(false);
+    expect(eligible.canPresidentDiscard).toBe(false);
+    expect(eligible.canChancellorDiscard).toBe(false);
+    expect(eligible.canResolveExecutivePower).toBe(false);
   });
 });

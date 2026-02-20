@@ -4,6 +4,7 @@ export type Policy = "LIBERAL" | "FASCIST";
 export type Role = "LIBERAL" | "FASCIST" | "HITLER";
 export type Team = "LIBERAL" | "FASCIST";
 export type Vote = "JA" | "NEIN";
+export type VoteRevealOutcome = "PASS" | "FAIL";
 export type BotColor =
   | "YELLOW"
   | "BLUE"
@@ -20,10 +21,18 @@ export type Phase =
   | "LOBBY"
   | "NOMINATION"
   | "VOTING"
+  | "VOTE_REVEAL"
   | "LEGISLATIVE_PRESIDENT"
   | "LEGISLATIVE_CHANCELLOR"
   | "EXECUTIVE_ACTION"
   | "GAME_OVER";
+
+export interface VoteRevealState {
+  votesByPlayerId: Record<string, Vote>;
+  outcome: VoteRevealOutcome;
+  startedAt: number;
+  endsAt: number;
+}
 
 export type WinnerTeam = "LIBERAL" | "FASCIST";
 export type WinReason =
@@ -69,6 +78,7 @@ export interface GameState {
   fascistEnacted: number;
   electionTracker: number;
   pendingVotes: Record<string, Vote>;
+  voteReveal?: VoteRevealState;
   legislativeHand?: Policy[];
   lastElectedPresidentSeat?: number;
   lastElectedChancellorSeat?: number;
@@ -210,6 +220,7 @@ export interface PublicGameState {
   fascistEnacted: number;
   electionTracker: number;
   pendingVotesCount: number;
+  voteReveal?: VoteRevealState;
   drawPileCount: number;
   discardPileCount: number;
   pendingExecutivePower?: PublicPendingExecutivePower;

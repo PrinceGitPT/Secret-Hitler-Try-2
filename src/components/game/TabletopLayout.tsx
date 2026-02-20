@@ -5,6 +5,7 @@ import { SeatRing } from "@/components/lobby/SeatRing";
 import { CardView } from "@/components/game/CardView";
 import { PolicyBoard } from "@/components/game/PolicyBoard";
 import { VotePanel } from "@/components/game/VotePanel";
+import { VoteRevealBanner } from "@/components/game/VoteRevealBanner";
 import { LegislativePanel } from "@/components/game/LegislativePanel";
 import { FactionIntelPanel } from "@/components/game/FactionIntelPanel";
 import { ExecutiveIntelPanel } from "@/components/game/ExecutiveIntelPanel";
@@ -148,6 +149,7 @@ export function TabletopLayout({
   const showTopActionPanel =
     game.phase === "NOMINATION" ||
     game.phase === "VOTING" ||
+    game.phase === "VOTE_REVEAL" ||
     game.phase === "LEGISLATIVE_PRESIDENT" ||
     game.phase === "LEGISLATIVE_CHANCELLOR" ||
     game.phase === "EXECUTIVE_ACTION";
@@ -196,6 +198,10 @@ export function TabletopLayout({
 
           {showTopActionPanel ? (
             <div className="top-action-slot">
+              {game.phase === "VOTE_REVEAL" && game.voteReveal ? (
+                <VoteRevealBanner voteReveal={game.voteReveal} />
+              ) : null}
+
               {game.phase === "NOMINATION" ? (
                 <div>
                   <h4>Nomination</h4>
@@ -441,6 +447,7 @@ export function TabletopLayout({
               currentSeat={game.presidentSeat}
               deadOverlayImage={theme.deadPlayerOverlayImage}
               botColorImages={theme.botColorImages}
+              revealedVotesByPlayerId={game.voteReveal?.votesByPlayerId}
             />
           </div>
         </div>

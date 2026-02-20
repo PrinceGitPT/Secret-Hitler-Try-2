@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAction } from "@/lib/game/engine";
+import { advanceVoteRevealIfExpired, applyAction } from "@/lib/game/engine";
 import { GameInvariantError } from "@/lib/game/errors";
 import { makeSeededRandom } from "@/lib/game/random";
 import type { Room } from "@/lib/game/types";
@@ -27,6 +27,7 @@ function baseRoom(overrides: Partial<Room> = {}): Room {
       fascistEnacted: 0,
       electionTracker: 0,
       pendingVotes: {},
+      voteReveal: undefined,
       lastElectedPresidentSeat: undefined,
       lastElectedChancellorSeat: undefined,
       specialElectionNextPresidentSeat: undefined,
@@ -97,7 +98,57 @@ describe("engine", () => {
     expect(result.game?.winReason).toBe("FASCIST_POLICY");
   });
 
-  it("enforces fascist win when Hitler is elected chancellor after 3+ fascist policies", () => {
+  it("enters vote reveal after final vote and locks further actions", () => {
+    const room = baseRoom({
+      game: {
+        phase: "VOTING",
+        presidentSeat: 1,
+        chancellorSeat: 2,
+        pendingVotes: {
+          p1: "JA",
+          p2: "JA",
+          p3: "NEIN",
+          p4: "JA"
+        }
+      }
+    });
+
+    const afterVote = applyAction(room, {
+      type: "CAST_VOTE",
+      actorId: "p5",
+      vote: "NEIN"
+    }).room;
+
+    expect(afterVote.game?.phase).toBe("VOTE_REVEAL");
+    expect(afterVote.game?.voteReveal?.outcome).toBe("PASS");
+    expect(afterVote.game?.voteReveal?.votesByPlayerId).toEqual({
+      p1: "JA",
+      p2: "JA",
+      p3: "NEIN",
+      p4: "JA",
+      p5: "NEIN"
+    });
+
+    expect(() =>
+      applyAction(afterVote, {
+        type: "NOMINATE_CHANCELLOR",
+        actorId: "p1",
+        nomineeId: "p2"
+      })
+    ).toThrowError(GameInvariantError);
+
+    try {
+      applyAction(afterVote, {
+        type: "NOMINATE_CHANCELLOR",
+        actorId: "p1",
+        nomineeId: "p2"
+      });
+    } catch (error) {
+      expect((error as GameInvariantError).code).toBe("VOTE_REVEAL_LOCKED");
+    }
+  });
+
+  it("resolves passed vote reveal to Hitler-elected fascist win", () => {
     const room = baseRoom({
       game: {
         phase: "VOTING",
@@ -113,19 +164,24 @@ describe("engine", () => {
       }
     });
 
-    const result = applyAction(room, {
+    const afterFinalVote = applyAction(room, {
       type: "CAST_VOTE",
       actorId: "p5",
       vote: "JA"
     }).room;
 
-    expect(result.game?.phase).toBe("GAME_OVER");
-    expect(result.game?.winner).toBe("FASCIST");
-    expect(result.game?.winReason).toBe("HITLER_ELECTED_CHANCELLOR");
-    expect(result.game?.legislativeHand).toBeUndefined();
+    expect(afterFinalVote.game?.phase).toBe("VOTE_REVEAL");
+
+    const revealEndsAt = afterFinalVote.game?.voteReveal?.endsAt ?? 0;
+    const advanced = advanceVoteRevealIfExpired(afterFinalVote, makeSeededRandom(11), revealEndsAt).room;
+
+    expect(advanced.game?.phase).toBe("GAME_OVER");
+    expect(advanced.game?.winner).toBe("FASCIST");
+    expect(advanced.game?.winReason).toBe("HITLER_ELECTED_CHANCELLOR");
+    expect(advanced.game?.legislativeHand).toBeUndefined();
   });
 
-  it("increments election tracker and chaos top-decks at three failed governments", () => {
+  it("resolves failed reveal into chaos top-deck at three failed governments", () => {
     const room = baseRoom({
       game: {
         phase: "VOTING",
@@ -146,7 +202,7 @@ describe("engine", () => {
       }
     });
 
-    const result = applyAction(
+    const afterFinalVote = applyAction(
       room,
       {
         type: "CAST_VOTE",
@@ -156,12 +212,18 @@ describe("engine", () => {
       makeSeededRandom(77)
     ).room;
 
-    expect(result.game?.phase).toBe("NOMINATION");
-    expect(result.game?.electionTracker).toBe(0);
-    expect(result.game?.fascistEnacted).toBe(4);
-    expect(result.game?.pendingExecutivePower).toBeUndefined();
-    expect(result.game?.lastElectedPresidentSeat).toBeUndefined();
-    expect(result.game?.lastElectedChancellorSeat).toBeUndefined();
+    expect(afterFinalVote.game?.phase).toBe("VOTE_REVEAL");
+    expect(afterFinalVote.game?.voteReveal?.outcome).toBe("FAIL");
+
+    const revealEndsAt = afterFinalVote.game?.voteReveal?.endsAt ?? 0;
+    const advanced = advanceVoteRevealIfExpired(afterFinalVote, makeSeededRandom(77), revealEndsAt).room;
+
+    expect(advanced.game?.phase).toBe("NOMINATION");
+    expect(advanced.game?.electionTracker).toBe(0);
+    expect(advanced.game?.fascistEnacted).toBe(4);
+    expect(advanced.game?.pendingExecutivePower).toBeUndefined();
+    expect(advanced.game?.lastElectedPresidentSeat).toBeUndefined();
+    expect(advanced.game?.lastElectedChancellorSeat).toBeUndefined();
   });
 
   it("resolves execution power and gives liberals win when Hitler is executed", () => {
@@ -233,10 +295,15 @@ describe("engine", () => {
       }).room;
     }, afterNomination);
 
-    expect(afterVotes.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
-    expect(afterVotes.game?.presidentSeat).toBe(4);
+    expect(afterVotes.game?.phase).toBe("VOTE_REVEAL");
 
-    const afterPresidentDiscard = applyAction(afterVotes, {
+    const revealed = advanceVoteRevealIfExpired(afterVotes, makeSeededRandom(5), afterVotes.game?.voteReveal?.endsAt ?? 0)
+      .room;
+
+    expect(revealed.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
+    expect(revealed.game?.presidentSeat).toBe(4);
+
+    const afterPresidentDiscard = applyAction(revealed, {
       type: "LEGISLATIVE_DISCARD",
       actorId: "p4",
       cardIndex: 0

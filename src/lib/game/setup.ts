@@ -246,6 +246,7 @@ export function startGame(room: Room, rng: RandomSource = systemRandom): Room {
       fascistEnacted: 0,
       electionTracker: 0,
       pendingVotes: {},
+      voteReveal: undefined,
       lastElectedPresidentSeat: undefined,
       lastElectedChancellorSeat: undefined,
       specialElectionNextPresidentSeat: undefined,

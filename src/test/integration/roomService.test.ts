@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { makeSeededRandom } from "@/lib/game/random";
+import { VOTE_REVEAL_MS } from "@/lib/game/voteReveal";
 import {
   createRoomService,
   getRoomStateService,
@@ -8,6 +9,7 @@ import {
   submitActionService
 } from "@/lib/server/roomService";
 import { getRoomChatService } from "@/lib/server/chatService";
+import { GameInvariantError } from "@/lib/game/errors";
 import { resetMemoryKvForTests, writeRoom } from "@/lib/store/kv";
 import type { Room } from "@/lib/game/types";
 
@@ -34,9 +36,13 @@ function serviceRoom(overrides: Partial<Room> = {}): Room {
       fascistEnacted: 0,
       electionTracker: 0,
       pendingVotes: {},
+      voteReveal: undefined,
       lastElectedPresidentSeat: undefined,
       lastElectedChancellorSeat: undefined,
+      specialElectionNextPresidentSeat: undefined,
+      specialElectionReturnSeat: undefined,
       pendingExecutivePower: undefined,
+      executiveIntelLogByPlayer: {},
       enactmentSequence: 0,
       winner: undefined,
       winReason: undefined
@@ -59,6 +65,12 @@ function serviceRoom(overrides: Partial<Room> = {}): Room {
 describe("room service integration", () => {
   beforeEach(() => {
     resetMemoryKvForTests();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("runs a full flow with multi-human and bot fill", async () => {
@@ -112,7 +124,7 @@ describe("room service integration", () => {
       rng
     });
 
-    await submitActionService({
+    const afterSecondVote = await submitActionService({
       roomCode,
       action: {
         type: "CAST_VOTE",
@@ -122,6 +134,9 @@ describe("room service integration", () => {
       rng
     });
 
+    expect(afterSecondVote.room.game?.phase).toBe("VOTE_REVEAL");
+
+    vi.advanceTimersByTime(VOTE_REVEAL_MS);
     const legislative = await getRoomStateService({ roomCode, actorId: hostId });
     expect(legislative.room.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
 
@@ -181,6 +196,62 @@ describe("room service integration", () => {
     expect(result.room.game?.winReason).toBe("LIBERAL_POLICY");
   });
 
+  it("blocks actions during vote reveal and then unlocks after 5 seconds", async () => {
+    const room = serviceRoom({
+      code: "LOCK01",
+      game: {
+        phase: "VOTING",
+        presidentSeat: 1,
+        chancellorSeat: 2,
+        pendingVotes: {
+          p1: "JA",
+          p2: "NEIN",
+          p3: "JA",
+          p4: "JA"
+        }
+      }
+    });
+
+    await writeRoom(room);
+
+    const reveal = await submitActionService({
+      roomCode: "LOCK01",
+      action: {
+        type: "CAST_VOTE",
+        actorId: "p5",
+        vote: "NEIN"
+      }
+    });
+
+    expect(reveal.room.game?.phase).toBe("VOTE_REVEAL");
+    expect(reveal.room.game?.voteReveal?.votesByPlayerId).toEqual({
+      p1: "JA",
+      p2: "NEIN",
+      p3: "JA",
+      p4: "JA",
+      p5: "NEIN"
+    });
+
+    try {
+      await submitActionService({
+        roomCode: "LOCK01",
+        action: {
+          type: "NOMINATE_CHANCELLOR",
+          actorId: "p1",
+          nomineeId: "p2"
+        }
+      });
+      throw new Error("Expected submitActionService to throw.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GameInvariantError);
+      expect((error as GameInvariantError).code).toBe("VOTE_REVEAL_LOCKED");
+    }
+
+    vi.advanceTimersByTime(VOTE_REVEAL_MS);
+    const stateAfterExpiry = await getRoomStateService({ roomCode: "LOCK01", actorId: "p1" });
+    expect(stateAfterExpiry.room.game?.phase).not.toBe("VOTE_REVEAL");
+  });
+
   it("ends game when Hitler is elected chancellor after 3 fascist policies", async () => {
     const room = serviceRoom({
       code: "HITLEC",
@@ -200,7 +271,7 @@ describe("room service integration", () => {
 
     await writeRoom(room);
 
-    const result = await submitActionService({
+    const afterVote = await submitActionService({
       roomCode: "HITLEC",
       action: {
         type: "CAST_VOTE",
@@ -208,6 +279,11 @@ describe("room service integration", () => {
         vote: "JA"
       }
     });
+
+    expect(afterVote.room.game?.phase).toBe("VOTE_REVEAL");
+
+    vi.advanceTimersByTime(VOTE_REVEAL_MS);
+    const result = await getRoomStateService({ roomCode: "HITLEC", actorId: "p1" });
 
     expect(result.room.game?.phase).toBe("GAME_OVER");
     expect(result.room.game?.winner).toBe("FASCIST");
@@ -247,7 +323,7 @@ describe("room service integration", () => {
     expect(result.room.game?.winReason).toBe("HITLER_EXECUTED");
   });
 
-  it("chaos top-decks at three failed elections", async () => {
+  it("chaos top-decks at three failed elections after reveal expires", async () => {
     const room = serviceRoom({
       code: "CHAOS1",
       game: {
@@ -271,7 +347,7 @@ describe("room service integration", () => {
 
     await writeRoom(room);
 
-    const result = await submitActionService({
+    const afterVote = await submitActionService({
       roomCode: "CHAOS1",
       action: {
         type: "CAST_VOTE",
@@ -279,6 +355,11 @@ describe("room service integration", () => {
         vote: "NEIN"
       }
     });
+
+    expect(afterVote.room.game?.phase).toBe("VOTE_REVEAL");
+
+    vi.advanceTimersByTime(VOTE_REVEAL_MS);
+    const result = await getRoomStateService({ roomCode: "CHAOS1", actorId: "p1" });
 
     expect(result.room.game?.phase).toBe("NOMINATION");
     expect(result.room.game?.electionTracker).toBe(0);
@@ -416,6 +497,10 @@ describe("room service integration", () => {
         }
       });
     }
+
+    vi.advanceTimersByTime(VOTE_REVEAL_MS);
+    const afterReveal = await getRoomStateService({ roomCode: "SPECEL", actorId: "p1" });
+    expect(afterReveal.room.game?.phase).toBe("LEGISLATIVE_PRESIDENT");
 
     await submitActionService({
       roomCode: "SPECEL",

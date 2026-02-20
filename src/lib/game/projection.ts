@@ -62,6 +62,14 @@ function toPublicGame(room: Room): PublicGameState | undefined {
     fascistEnacted: room.game.fascistEnacted,
     electionTracker: room.game.electionTracker,
     pendingVotesCount: Object.keys(room.game.pendingVotes).length,
+    voteReveal: room.game.voteReveal
+      ? {
+          votesByPlayerId: { ...room.game.voteReveal.votesByPlayerId },
+          outcome: room.game.voteReveal.outcome,
+          startedAt: room.game.voteReveal.startedAt,
+          endsAt: room.game.voteReveal.endsAt
+        }
+      : undefined,
     drawPileCount: room.game.drawPile.length,
     discardPileCount: room.game.discardPile.length,
     pendingExecutivePower: toPublicPendingExecutivePower(room),
@@ -98,7 +106,7 @@ export function deriveEligibleActions(room: Room, actorId?: string): EligibleAct
     return noActions(actor?.id === room.hostId && !room.locked, actor?.id === room.hostId && !room.locked);
   }
 
-  if (game.phase === "GAME_OVER") {
+  if (game.phase === "GAME_OVER" || game.phase === "VOTE_REVEAL") {
     return noActions(false, false);
   }
 

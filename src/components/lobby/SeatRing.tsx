@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { BotColor, PublicPlayer, RoomSize } from "@/lib/game/types";
+import type { BotColor, PublicPlayer, RoomSize, Vote } from "@/lib/game/types";
 
 interface SeatRingProps {
   players: PublicPlayer[];
@@ -7,6 +7,7 @@ interface SeatRingProps {
   currentSeat?: number;
   deadOverlayImage?: string;
   botColorImages?: Partial<Record<BotColor, string>>;
+  revealedVotesByPlayerId?: Record<string, Vote>;
 }
 
 function seatPosition(seat: number, roomSize: number): { x: number; y: number } {
@@ -52,7 +53,14 @@ type SeatStyle = CSSProperties & {
   "--seat-bot-color"?: string;
 };
 
-export function SeatRing({ players, roomSize, currentSeat, deadOverlayImage, botColorImages }: SeatRingProps) {
+export function SeatRing({
+  players,
+  roomSize,
+  currentSeat,
+  deadOverlayImage,
+  botColorImages,
+  revealedVotesByPlayerId
+}: SeatRingProps) {
   const seats = Array.from({ length: roomSize }, (_, index) => index + 1);
 
   return (
@@ -104,6 +112,14 @@ export function SeatRing({ players, roomSize, currentSeat, deadOverlayImage, bot
             {player ? (
               <>
                 {player.isBot ? <div className="seat-avatar" aria-hidden="true" /> : null}
+                {revealedVotesByPlayerId?.[player.id] ? (
+                  <div
+                    className={`seat-vote ${revealedVotesByPlayerId[player.id] === "JA" ? "ja" : "nein"}`}
+                    aria-label={`Vote ${revealedVotesByPlayerId[player.id]}`}
+                  >
+                    {revealedVotesByPlayerId[player.id]}
+                  </div>
+                ) : null}
                 <strong>{player.name}</strong>
                 <div className="meta">Seat {seat}</div>
                 <div className="meta">

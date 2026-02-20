@@ -1,4 +1,4 @@
-import { applyAction } from "@/lib/game/engine";
+import { advanceVoteRevealIfExpired, applyAction } from "@/lib/game/engine";
 import { buildAutoExecutiveResolution } from "@/lib/game/executive";
 import { postBotPhaseMessage } from "@/lib/server/chatService";
 import { GameInvariantError } from "@/lib/game/errors";
@@ -66,6 +66,7 @@ function normalizeRoom(room: Room): Room {
   const gameChanged =
     legacy.electionTracker === undefined ||
     legacy.pendingVotes === undefined ||
+    !Object.prototype.hasOwnProperty.call(legacy, "voteReveal") ||
     legacy.enactmentSequence === undefined ||
     legacy.drawPile === undefined ||
     legacy.discardPile === undefined ||
@@ -87,6 +88,7 @@ function normalizeRoom(room: Room): Room {
     fascistEnacted: legacy.fascistEnacted ?? 0,
     electionTracker: legacy.electionTracker ?? 0,
     pendingVotes: legacy.pendingVotes ?? {},
+    voteReveal: legacy.voteReveal,
     legislativeHand: legacy.legislativeHand,
     lastElectedPresidentSeat: legacy.lastElectedPresidentSeat,
     lastElectedChancellorSeat: legacy.lastElectedChancellorSeat,
@@ -255,6 +257,27 @@ function runSystemLoop(initialRoom: Room, rng: RandomSource = systemRandom): Roo
   throw new GameInvariantError("BOT_LOOP_OVERFLOW", "System loop exceeded safe iteration cap.");
 }
 
+function maybeAdvanceExpiredVoteReveal(
+  room: Room,
+  rng: RandomSource = systemRandom
+): { room: Room; advanced: boolean } {
+  const transition = advanceVoteRevealIfExpired(room, rng);
+  if (!transition.advanced) {
+    return {
+      room,
+      advanced: false
+    };
+  }
+
+  processGameEvents(transition.room, transition.events);
+  const resolved = runSystemLoop(transition.room, rng);
+
+  return {
+    room: resolved,
+    advanced: true
+  };
+}
+
 function ensureActorInRoom(room: Room, actorId: string): void {
   if (!getPlayerById(room, actorId)) {
     throw new GameInvariantError("ACTOR_NOT_IN_ROOM", "Actor does not belong to this room.");
@@ -407,7 +430,8 @@ export async function startRoomService(params: {
 
   const previousPhase = room.game?.phase;
   const started = startGame(room, params.rng ?? systemRandom);
-  const resolved = runSystemLoop(started, params.rng ?? systemRandom);
+  let resolved = runSystemLoop(started, params.rng ?? systemRandom);
+  resolved = maybeAdvanceExpiredVoteReveal(resolved, params.rng ?? systemRandom).room;
   await writeRoom(resolved);
   await emitPhaseBotChatIfNeeded({
     room: resolved,
@@ -433,7 +457,12 @@ export async function getRoomStateService(params: {
   roomCode: string;
   actorId?: string;
 }): Promise<RoomProjection & { themes: ReturnType<typeof listThemes>; theme: ReturnType<typeof getThemeById> }> {
-  const room = await getRoomOrThrow(params.roomCode);
+  let room = await getRoomOrThrow(params.roomCode);
+  const revealAdvance = maybeAdvanceExpiredVoteReveal(room, systemRandom);
+  if (revealAdvance.advanced) {
+    room = revealAdvance.room;
+    await writeRoom(room);
+  }
 
   return {
     room: toPublicRoom(room),
@@ -451,19 +480,27 @@ export async function submitActionService(params: {
   action: GameAction;
   rng?: RandomSource;
 }): Promise<RoomProjection> {
-  const room = await getRoomOrThrow(params.roomCode);
+  const rng = params.rng ?? systemRandom;
+  let room = await getRoomOrThrow(params.roomCode);
   ensureActorInRoom(room, params.action.actorId);
 
+  const revealAdvance = maybeAdvanceExpiredVoteReveal(room, rng);
+  if (revealAdvance.advanced) {
+    room = revealAdvance.room;
+    await writeRoom(room);
+  }
+
   const previousPhase = room.game?.phase;
-  const result = applyAction(room, params.action, params.rng ?? systemRandom);
+  const result = applyAction(room, params.action, rng);
   processGameEvents(result.room, result.events);
 
-  const resolved = runSystemLoop(result.room, params.rng ?? systemRandom);
+  let resolved = runSystemLoop(result.room, rng);
+  resolved = maybeAdvanceExpiredVoteReveal(resolved, rng).room;
   await writeRoom(resolved);
   await emitPhaseBotChatIfNeeded({
     room: resolved,
     previousPhase,
-    rng: params.rng ?? systemRandom
+    rng
   });
   logRoomEvent("action_submitted", resolved, {
     actionType: params.action.type,

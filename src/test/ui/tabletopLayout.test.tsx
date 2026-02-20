@@ -1,6 +1,6 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TabletopLayout } from "@/components/game/TabletopLayout";
 import type {
   EligibleActions,
@@ -60,6 +60,7 @@ function makeRoom(phase: Phase): PublicRoom {
       fascistEnacted: 2,
       electionTracker: 0,
       pendingVotesCount: phase === "VOTING" ? 2 : 0,
+      voteReveal: undefined,
       drawPileCount: 11,
       discardPileCount: 4,
       pendingExecutivePower: undefined,
@@ -106,6 +107,10 @@ function makeViewerPrivate(overrides?: Partial<ViewerPrivateState>): ViewerPriva
 }
 
 describe("tabletop layout", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders nomination in the top election panel and hides bottom action bar", () => {
     const room = makeRoom("NOMINATION");
     const eligible = makeEligible({ canNominate: true, eligibleNomineeIds: ["p2"] });
@@ -359,6 +364,52 @@ describe("tabletop layout", () => {
 
     expect(screen.getByText("LIBERAL Victory")).toBeInTheDocument();
     expect(screen.getByText("Hitler was executed.")).toBeInTheDocument();
+  });
+
+  it("renders vote reveal banner, countdown, and seat votes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(1_000));
+
+    const room = makeRoom("VOTE_REVEAL");
+    room.game!.voteReveal = {
+      votesByPlayerId: {
+        p1: "JA",
+        p2: "NEIN",
+        b1: "JA",
+        b2: "NEIN",
+        b3: "JA"
+      },
+      outcome: "FAIL",
+      startedAt: 1_000,
+      endsAt: 6_000
+    };
+    const eligible = makeEligible();
+
+    render(
+      <TabletopLayout
+        room={room}
+        theme={theme}
+        eligible={eligible}
+        actorId="p1"
+        onNominate={vi.fn()}
+        onVote={vi.fn()}
+        onPresidentDiscard={vi.fn()}
+        onChancellorDiscard={vi.fn()}
+        onResolveExecutivePower={vi.fn()}
+        {...chatProps}
+      />
+    );
+
+    expect(screen.getByText("Votes Revealed")).toBeInTheDocument();
+    expect(screen.getByText(/Next action in/i)).toBeInTheDocument();
+    expect(screen.getByText("Government Rejected")).toBeInTheDocument();
+    expect(screen.getAllByText("JA").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("NEIN").length).toBeGreaterThan(0);
+
+    act(() => {
+      vi.advanceTimersByTime(4_100);
+    });
+    expect(screen.queryByText("Government Rejected")).not.toBeInTheDocument();
   });
 
   it("renders private executive intel history in side rail", () => {
