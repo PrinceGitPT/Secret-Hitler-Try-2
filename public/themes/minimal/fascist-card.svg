@@ -1,0 +1,27 @@
+<svg width="300" height="460" viewBox="0 0 300 460" xmlns="http://www.w3.org/2000/svg">
+  <rect width="300" height="460" fill="#ead8bd"/>
+  <rect x="28" y="22" width="244" height="416" rx="12" fill="#e56f58"/>
+  <rect x="58" y="56" width="184" height="340" fill="#ead8bd"/>
+  <polygon points="206,56 242,56 242,92" fill="#e56f58"/>
+  <polygon points="212,62 236,86 212,86" fill="#ead8bd"/>
+
+  <circle cx="150" cy="122" r="28" fill="#e56f58"/>
+  <ellipse cx="141" cy="124" rx="6" ry="8" fill="#ead8bd"/>
+  <ellipse cx="159" cy="124" rx="6" ry="8" fill="#ead8bd"/>
+  <polygon points="150,134 145,144 155,144" fill="#ead8bd"/>
+  <rect x="136" y="146" width="28" height="16" rx="8" fill="#e56f58"/>
+  <rect x="136" y="154" width="28" height="8" fill="#ead8bd"/>
+  <rect x="145" y="154" width="2" height="8" fill="#e56f58"/>
+  <rect x="149" y="154" width="2" height="8" fill="#e56f58"/>
+  <rect x="153" y="154" width="2" height="8" fill="#e56f58"/>
+
+  <text x="150" y="228" text-anchor="middle" fill="#e56f58" font-size="54" font-family="Georgia, serif" font-weight="700" letter-spacing="3">FASCIST</text>
+  <line x1="82" y1="244" x2="218" y2="244" stroke="#e56f58" stroke-width="4" stroke-dasharray="2 6"/>
+  <text x="150" y="282" text-anchor="middle" fill="#e56f58" font-size="40" font-family="Avenir Next, Trebuchet MS, sans-serif" font-weight="700" letter-spacing="4">ARTICLE</text>
+
+  <line x1="80" y1="302" x2="220" y2="302" stroke="#e56f58" stroke-width="4"/>
+  <line x1="80" y1="318" x2="220" y2="318" stroke="#e56f58" stroke-width="4"/>
+  <line x1="80" y1="334" x2="220" y2="334" stroke="#e56f58" stroke-width="4"/>
+  <line x1="80" y1="360" x2="220" y2="360" stroke="#e56f58" stroke-width="4"/>
+  <line x1="80" y1="376" x2="220" y2="376" stroke="#e56f58" stroke-width="4"/>
+</svg>

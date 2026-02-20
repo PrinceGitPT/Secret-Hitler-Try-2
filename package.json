@@ -1,0 +1,33 @@
+{
+  "name": "secret-hitler-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "clean:next": "node scripts/clean-next.cjs",
+    "predev": "npm run clean:next",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@vercel/kv": "^1.0.1",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "eslint": "^9.16.0",
+    "eslint-config-next": "^15.1.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

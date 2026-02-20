@@ -1,0 +1,13 @@
+<svg width="300" height="460" viewBox="0 0 300 460" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="back" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#352f22"/>
+      <stop offset="100%" stop-color="#1c1912"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="280" height="440" rx="18" fill="url(#back)" stroke="#e8c67c" stroke-width="4"/>
+  <rect x="40" y="40" width="220" height="380" rx="14" fill="none" stroke="#e8c67c" stroke-opacity="0.5" stroke-width="2"/>
+  <circle cx="150" cy="230" r="62" fill="none" stroke="#e8c67c" stroke-opacity="0.5" stroke-width="4"/>
+  <text x="150" y="238" text-anchor="middle" fill="#f3deaf" font-size="22" font-family="Cinzel, serif">SECRET</text>
+  <text x="150" y="266" text-anchor="middle" fill="#f3deaf" font-size="22" font-family="Cinzel, serif">HITLER</text>
+</svg>

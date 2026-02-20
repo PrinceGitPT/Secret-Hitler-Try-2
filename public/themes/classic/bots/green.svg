@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Bot token">
+  <defs>
+    <radialGradient id="g" cx="30%" cy="25%" r="75%">
+      <stop offset="0%" stop-color="#bbefce"/>
+      <stop offset="100%" stop-color="#2f8150"/>
+    </radialGradient>
+  </defs>
+  <circle cx="60" cy="60" r="52" fill="url(#g)" stroke="rgba(31, 22, 10, 0.72)" stroke-width="6"/>
+  <circle cx="60" cy="60" r="37" fill="#46b36f" fill-opacity="0.22"/>
+  <text x="60" y="72" text-anchor="middle" font-size="48" font-family="Trebuchet MS, Verdana, sans-serif" font-weight="700" fill="#fff8ec">B</text>
+</svg>

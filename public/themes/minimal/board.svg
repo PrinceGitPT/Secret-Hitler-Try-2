@@ -1,0 +1,13 @@
+<svg width="1400" height="700" viewBox="0 0 1400 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="paper" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#5f553d"/>
+      <stop offset="100%" stop-color="#342d21"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="700" fill="url(#paper)"/>
+  <rect x="30" y="40" width="1340" height="290" rx="20" fill="none" stroke="#d9bf88" stroke-opacity="0.55" stroke-width="2"/>
+  <rect x="30" y="370" width="1340" height="290" rx="20" fill="none" stroke="#d9bf88" stroke-opacity="0.55" stroke-width="2"/>
+  <text x="70" y="95" fill="#f5e4bc" font-size="36" font-family="Cinzel, serif">Liberal Policy Track</text>
+  <text x="70" y="425" fill="#f5e4bc" font-size="36" font-family="Cinzel, serif">Fascist Policy Track</text>
+</svg>

@@ -1,0 +1,19 @@
+<svg width="300" height="460" viewBox="0 0 300 460" xmlns="http://www.w3.org/2000/svg">
+  <rect width="300" height="460" fill="#ead8bd"/>
+  <rect x="28" y="22" width="244" height="416" rx="12" fill="#59a9bc"/>
+  <rect x="58" y="56" width="184" height="340" fill="#ead8bd"/>
+  <polygon points="206,56 242,56 242,92" fill="#59a9bc"/>
+  <polygon points="212,62 236,86 212,86" fill="#ead8bd"/>
+
+  <path d="M118 120 C128 98,146 90,152 106 C159 84,185 84,180 110 C201 102,209 118,196 132 C186 142,172 149,158 154 C146 156,138 152,130 146 C121 140,114 130,118 120 Z" fill="#59a9bc"/>
+
+  <text x="150" y="228" text-anchor="middle" fill="#59a9bc" font-size="54" font-family="Georgia, serif" font-weight="700" letter-spacing="3">LIBERAL</text>
+  <line x1="82" y1="244" x2="218" y2="244" stroke="#59a9bc" stroke-width="4" stroke-dasharray="2 6"/>
+  <text x="150" y="282" text-anchor="middle" fill="#59a9bc" font-size="40" font-family="Avenir Next, Trebuchet MS, sans-serif" font-weight="700" letter-spacing="4">ARTICLE</text>
+
+  <line x1="80" y1="302" x2="220" y2="302" stroke="#59a9bc" stroke-width="4"/>
+  <line x1="80" y1="318" x2="220" y2="318" stroke="#59a9bc" stroke-width="4"/>
+  <line x1="80" y1="334" x2="220" y2="334" stroke="#59a9bc" stroke-width="4"/>
+  <line x1="80" y1="360" x2="220" y2="360" stroke="#59a9bc" stroke-width="4"/>
+  <line x1="80" y1="376" x2="220" y2="376" stroke="#59a9bc" stroke-width="4"/>
+</svg>
